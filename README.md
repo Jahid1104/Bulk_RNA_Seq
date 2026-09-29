@@ -72,6 +72,13 @@ Bulk_RNA_Seq/
 └── Metadata.csv
 ```
 
+To create all the folders at once, run this from the directory where you want the project (add `Metadata.csv` yourself):
+
+```bash
+mkdir -p Bulk_RNA_Seq/{1_Codes,2_References,3_Raw_Reads,4_Trimmed_Reads} \
+         Bulk_RNA_Seq/5_Results/{1_fastp,2_Salmon,3_tximport,4_Sample_Relationship_Analysis,5_DESeq2,6.1_GO,6.2_KEGG,7_TF,8_WGCNA}
+```
+
 ## Before you run anything
 
 The scripts contain placeholder paths written as `/.../.../`. Replace them with your own paths in every script:
