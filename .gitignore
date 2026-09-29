@@ -47,3 +47,11 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+
+   *.fq.gz
+   *.bam
+   *.sf
+   *.html
+   *.json
+   salmon_tmt_index/
