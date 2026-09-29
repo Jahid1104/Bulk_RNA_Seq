@@ -13,8 +13,8 @@ Author: Md Jahid Hasan Jone
 | 1 | `1_Bulk_RNA_Seq_fastp.sh` | Trims and filters raw reads with fastp; writes an HTML and JSON report per sample |
 | 2 | `2_Salmon.sh` | Builds the Salmon index (if missing) and quantifies each sample |
 | 3.1 | `3.1_make_tx2gene.R` | Builds the transcript-to-gene table from the GFF |
-| 3.2 | `3.2_tximport_combined.R` | Imports Salmon output with tximport, writes count and TPM tables, and makes QC plots |
-| 4 | `4_sample_relationship_analysis.py` | Sample relationship analysis |
+| 3.2 | `3.2_tximport_combined.R` | Imports Salmon output with tximport and writes gene count and TPM tables |
+| 4 | `4_sample_relationship_analysis.py` | Combined figure: PCA, sample correlation heat map and expression violin plot |
 | 5 | `5_DESeq2_Analysis.R` | Differential expression with DESeq2 |
 | 6.1 | `6.1_GeneOntology.R` | GO enrichment |
 | 6.2 | `6.2_KEGG_Analysis.R` | KEGG enrichment |
@@ -23,13 +23,14 @@ Author: Md Jahid Hasan Jone
 
 Helper scripts: `fastp_summary_from_json_files.py`, `Fastp_HTML_to_PowerPoint.py`, `collect_salmon_mapping_rate.py`, `submit_R.sh`.
 
-Steps 4 to 8 and the helper scripts are being added to this repository one at a time as they are finalized. Steps 1 to 3.2 are documented in full below.
+Steps 5 to 8 and the helper scripts are being added to this repository one at a time as they are finalized. Steps 1 to 4 are documented in full below.
 
 ## Requirements
 
 - An LSF cluster with `bsub`, and conda
 - A conda environment containing `fastp` and `salmon`
-- R with these packages: `rtracklayer`, `dplyr`, `readr`, `tidyr`, `tibble`, `ggplot2`, `stringr`, `tximport`, `DESeq2`
+- Python 3 with `pandas`, `numpy`, `matplotlib`, `seaborn` and `scikit-learn`
+- R with these packages: `rtracklayer`, `dplyr`, `readr`, `stringr`, `tximport`
 
 ## Folder structure
 
@@ -144,16 +145,45 @@ Run `3.1_make_tx2gene.R` in RStudio or with `Rscript`. It keeps the `mRNA` featu
 
 The script ends with a check. Point it at any sample's `quant.sf`; the printed fraction should be close to 1. A low value means the transcript IDs in the GFF and the fasta do not match.
 
-## Step 3.2: Count matrix and QC plots
+## Step 3.2: Count matrix (tximport)
 
-Run `3.2_tximport_combined.R`. It reads every `quant.sf` under `5_Results/2_Salmon/` and summarizes to genes with `countsFromAbundance = "lengthScaledTPM"`.
+Run `3.2_tximport_combined.R`. It reads every `quant.sf` under `5_Results/2_Salmon/`, sorts the samples in natural order (`2F` before `10F`), and summarizes to genes with `countsFromAbundance = "lengthScaledTPM"`.
 
 Written to `5_Results/3_tximport/`:
 
-- `Gene_counts.csv`, `TPM.csv`, `Sample_Summary.csv`
-- TIFF plots (600 dpi): gene count and TPM distributions, count and TPM density, total counts per sample, and a PCA of samples
+- `txi.rds`: the full tximport object, for DESeq2 later
+- `gene_counts.csv`
+- `TPM.csv`
 
-The plots colour samples by tissue. The script gets the tissue from the sample name with the pattern `number + F or L` (for example `2F_T0_48h_R1` gives `F`). If your sample names follow a different pattern, edit `extract_tissue()` in the script.
+Each sample folder in `5_Results/2_Salmon/` must have a unique name, because the folder name becomes the column name.
+
+## Step 4: Sample relationships
+
+```bash
+python 4_sample_relationship_analysis.py
+```
+
+Reads `5_Results/3_tximport/gene_counts.csv`, removes genes with zero counts in every sample, and applies log2(count + 1). Writes one combined figure, `Figure1_Combined.png` (1000 dpi) and `Figure1_Combined.pdf`, to `5_Results/4_Sample_Relationship_Analysis/`:
+
+- (A) PCA with a 95% confidence ellipse per group
+- (B) Pearson correlation between samples
+- (C) log2(count + 1) distribution per sample (violin plot)
+
+**Groups.** The group is taken from each sample name: the name is split at `group_sep` and the first `group_fields` pieces are joined. Set both near the top of the script.
+
+| Setting | `2L_T1_72h_R3` becomes |
+| --- | --- |
+| `group_fields = 1` (default) | `2L` |
+| `group_fields = 2` | `2L_T1` |
+| `group_fields = -1` (drops the last piece, usually the replicate) | `2L_T1_72h` |
+
+The script prints the group sizes and warns if every sample ends up in its own group or all samples end up in one. Check that printout before using the figure.
+
+**Colors.** Group colors are assigned automatically (10 or fewer groups use a standard 10-color palette, more groups get evenly spaced hues). To use your own colors, fill in `custom_palette` in the script.
+
+**Fonts.** Sizes, weights and styles for all text are set in the `STYLE` dictionary at the top of the script.
+
+The figure is saved at 1000 dpi, and with many samples the PNG is large. Lower the `dpi` in the two `plt.savefig` calls if it runs out of memory.
 
 ## Single-end reads
 

@@ -1,68 +1,20 @@
-"""
-Sample Relationship Analysis - Combined (PE + SE) gene counts
-=================================================================
-Recreates Figure 2 style panels from Li et al. (2025, Czech J. Genet. Plant
-Breed.) using the combined PE+SE gene count table produced by
-`tximport_combined.R` (New_Name/Results/tximport/Combined_gene_counts.csv):
+##Bulk RNA Seq Data Analysis Workflow by Md Jahid Hasan Jone##
 
-    (A) PCA of all expression samples, colored by 1F/1L/2F/2L group,
-        with a 95% confidence ellipse drawn around each group
-    (B) Sample-to-sample Pearson correlation heat map
-    (C) Violin plot of the gene expression distribution (log2(count+1)) per sample
-
-Sample naming / groups
------------------------
-Column names are the Salmon sample names produced by tximport, e.g.
-"1F_T0_24h_R1", "2L_T1_72h_R3", etc. Per Metadata.csv:
-    - leading digit  -> genotype: 1 = CLN1466EA, 2 = NC123S
-    - trailing letter -> tissue:   F = Flower,    L = Leaf
-So the leading "<digit><letter>" combination (1F, 1L, 2F, 2L) defines four
-genotype x tissue groups, and every plot below is colored by that group
-(instead of just Flower/Leaf).
-
-All figures are exported at 1000 dpi (same as the notebook) as PNG + PDF
-into `output_dir` below - no Colab upload/download needed, everything
-reads/writes local files.
-
-STYLE / FONT CONTROL
----------------------
-Every font used across every panel (titles, axis labels, tick labels,
-legends, PCA sample labels, panel tags a/b/c) is driven from the single
-STYLE dictionary in section 0 below. Change size / weight ("bold" or
-"normal") / style ("italic" or "normal") there and every panel picks it up
-automatically - no need to hunt through the plotting code.
-"""
-# -----------------------------
-# Check and install required packages
-# -----------------------------
-import importlib.util
-import subprocess
-import sys
-
-_required = {
-    "pandas": "pandas",
-    "numpy": "numpy",
-    "matplotlib": "matplotlib",
-    "seaborn": "seaborn",
-    "sklearn": "scikit-learn",
-}
-
-_missing = [
-    pip_name
-    for mod_name, pip_name in _required.items()
-    if importlib.util.find_spec(mod_name) is None
-]
-
-if _missing:
-    print(f"Installing missing packages: {_missing}")
-    subprocess.check_call([
-        sys.executable, "-m", "pip", "install", *_missing
-    ])
+# Sample relationship analysis from the tximport gene count table.
+# One combined figure (Figure 1):
+#   (A) PCA of all samples, colored by group, with a 95% confidence ellipse per group
+#   (B) Sample-to-sample Pearson correlation heat map
+#   (C) Violin plot of log2(count + 1) per sample
+#
+# STYLE / FONT CONTROL
+# Every font (titles, axis labels, tick labels, legends, PCA sample labels,
+# panel tags) is set in the STYLE dictionary below. Change size / weight
+# ("bold" or "normal") / style ("italic" or "normal") there.
 
 import re
 import os
-import pandas as pd
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.transforms as transforms
 from matplotlib.patches import Ellipse
@@ -76,24 +28,17 @@ plt.rcParams['svg.fonttype'] = 'none'
 
 
 # =====================================================================
-# 0. STYLE / FONT SETTINGS  <- EDIT ANYTHING HERE
+# STYLE / FONT SETTINGS  <- EDIT ANYTHING HERE
 # =====================================================================
-# size   -> font size in points
-# weight -> "normal" or "bold"
-# style  -> "normal" or "italic"
-#
-# Every ax.set_title / set_xlabel / tick_params / legend call below reads
-# from this dict, so changing a value here changes it everywhere that
-# element is used (standalone panels AND the combined Figure2_Combined_All).
 STYLE = {
-    "panel_title":   {"size": 13, "weight": "bold",   "style": "normal"},  # "(A) Principal Component Analysis" etc.
+    "panel_title":   {"size": 13, "weight": "bold",   "style": "normal"},
     "axis_label":    {"size": 12, "weight": "normal",  "style": "normal"},  # PC1/PC2, "log2(count+1)"
     "tick_label":    {"size": 9,  "weight": "normal",  "style": "normal"},  # numeric / sample-name tick labels
     "sample_label":  {"size": 6,  "weight": "normal",  "style": "normal"},  # sample-name text next to PCA points
     "legend_title":  {"size": 10, "weight": "normal",  "style": "normal"},
     "legend_text":   {"size": 9,  "weight": "normal",  "style": "normal"},
     "heatmap_annot": {"size": 6,  "weight": "normal",  "style": "normal"},  # numbers inside the correlation heatmap
-    "panel_tag":     {"size": 14, "weight": "bold",    "style": "normal"},  # (A) (B) (C) tags on the combined figure
+    "panel_tag":     {"size": 14, "weight": "bold",    "style": "normal"},  # (A) (B) (C) panel titles
 }
 
 
@@ -135,11 +80,7 @@ def style_legend(legend):
 def confidence_ellipse(x, y, ax, n_std=2.4477, **kwargs):
     """
     Draw a 95% confidence ellipse for the 2D points (x, y) onto ax.
-
-    n_std = 2.4477 corresponds to sqrt(chi2.ppf(0.95, df=2)), i.e. the
-    scaling that makes this a 95% confidence ellipse for a bivariate
-    normal (this is the standard "95% CI ellipse" used for PCA score
-    plots, matching e.g. ggplot2's stat_ellipse(level = 0.95, type="norm")).
+    n_std = 2.4477 = sqrt(chi2.ppf(0.95, df=2)).
     Needs at least 3 points per group; groups with fewer points are skipped.
     """
     if len(x) < 3:
@@ -169,8 +110,7 @@ def confidence_ellipse(x, y, ax, n_std=2.4477, **kwargs):
 
 def plot_pca_panel(ax, pca_df, palette, group_order, explained,
                     point_size=55, label_points=True, draw_ellipses=True):
-    """Shared PCA scatter + 95% ellipse plotting, used by both the standalone
-    Panel A figure and the combined Figure2_Combined_All panel A."""
+    """PCA scatter + 95% ellipse per group."""
     all_groups = group_order + [g for g in pca_df['Group'].unique() if g not in group_order]
 
     for grp in all_groups:
@@ -201,87 +141,90 @@ def plot_pca_panel(ax, pca_df, palette, group_order, explained,
 
 
 # -----------------------------
-# 1. User paths (edit these)
+# Paths
 # -----------------------------
-# Gene count CSV produced by tximport_PE.R (write.csv(txi_pe$counts, ...))
-csv_filename = "New_Name/Results/3_tximport/gene_counts.csv"
+csv_filename = "/.../.../Bulk_RNA_seq/5_Results/3_tximport/gene_counts.csv"
+output_dir = "/.../.../Bulk_RNA_seq/5_Results/4_Sample_Relationship_Analysis"
 
-# Where the figures for this run get saved
-output_dir = "New_Name/Results/4_Sample_Relationships"
 os.makedirs(output_dir, exist_ok=True)
 
 
 # -----------------------------
-# 2. Load data and assign sample groups
-# First column is treated as the gene ID and set as the index.
+# Sample groups (edit these two lines to match your sample names)
+# -----------------------------
+# The group is taken from the sample name: split the name at group_sep and
+# join the first group_fields pieces.
+#   group_fields =  1   "2L_T1_72h_R3"   -> "2L"          (default)
+#   group_fields =  2   "2L_T1_72h_R3"   -> "2L_T1"
+#   group_fields = -1   "2L_T1_72h_R3"   -> "2L_T1_72h"   (drops only the last piece, usually the replicate)
+group_sep = "_"
+group_fields = 1
+
+# Optional: your own colors, e.g. {'Control': '#1f77b4', 'Heat': '#d62728'}.
+# Leave empty to get colors automatically. Groups missing from this dict also get automatic colors.
+custom_palette = {}
+
+
+# -----------------------------
+# Load data (first column = gene ID)
 # -----------------------------
 df = pd.read_csv(csv_filename, index_col=0)
 print("Shape (genes x samples):", df.shape)
-print(df.head())
 
-# Keep only numeric expression columns (safety check)
 df = df.apply(pd.to_numeric, errors='coerce')
 df = df.dropna(how='all')
 print("After cleaning, shape:", df.shape)
 
 
-# Assign group (1F / 1L / 2F / 2L) based on the leading "<digit><letter>"
-# of each sample name, e.g. "2L_T1_72h_R3" -> "2L"
 def get_group(sample_name):
-    s = str(sample_name).strip().upper()
-    m = re.match(r'^(\d+)([FL])', s)
-    if m:
-        return f"{m.group(1)}{m.group(2)}"
-    return "Unknown"
+    pieces = str(sample_name).strip().split(group_sep)
+    group = group_sep.join(pieces[:group_fields])
+    return group if group else "Unknown"
 
 
 sample_groups = pd.Series({s: get_group(s) for s in df.columns}, name='Group')
 print(sample_groups.value_counts())
 
-if (sample_groups == 'Unknown').any():
-    print("\nWARNING: some samples could not be classified into a 1F/1L/2F/2L group:")
-    print(sample_groups[sample_groups == 'Unknown'])
+if sample_groups.nunique() == len(sample_groups):
+    print("\nWARNING: every sample is in its own group. Check group_sep and group_fields.")
+if sample_groups.nunique() == 1:
+    print("\nWARNING: all samples are in one group. Check group_sep and group_fields.")
 
 
 # -----------------------------
-# 3. Filter and transform expression data
-# - Remove genes with zero expression across all samples.
-# - Apply a log2(count + 1) transform (same convention as log2(FPKM+1)
-#   used in the paper's Figure 2C).
+# Filter and transform
 # -----------------------------
-# Remove genes that are all-zero across samples
+# Remove genes with zero counts in all samples, then log2(count + 1)
 expr_raw = df.loc[(df.sum(axis=1) > 0)]
 print("Genes retained after removing all-zero rows:", expr_raw.shape[0])
 
-# log2(count + 1) transform
 expr_log = np.log2(expr_raw + 1)
-print(expr_log.head())
 
 
 # -----------------------------
-# Shared color palette for the four genotype x tissue groups
-# Flower = warm colors, Leaf = cool/green colors; genotype 1 vs 2 = shade
+# Group order and colors
 # -----------------------------
-palette = {
-    '1F': '#E69F00',   # genotype 1, Flower - orange
-    '2F': '#D55E00',   # genotype 2, Flower - vermillion
-    '1L': '#009E73',   # genotype 1, Leaf   - teal green
-    '2L': '#004D40',   # genotype 2, Leaf   - dark green
-    'Unknown': '#888888',
-}
-group_order = ['1F', '1L', '2F', '2L']
+def natural_pad(text):
+    # pad every run of digits so "10" sorts after "2"
+    return re.sub(r'\d+', lambda m: m.group().zfill(10), str(text).strip())
+
+
+group_order = sorted(sample_groups.unique(), key=natural_pad)
+
+# One color per group: tab10 for up to 10 groups, evenly spaced hues for more
+auto_colors = sns.color_palette("tab10" if len(group_order) <= 10 else "husl", len(group_order))
+palette = {g: custom_palette.get(g, c) for g, c in zip(group_order, auto_colors)}
 
 
 # -----------------------------
-# 4. Panel A - PCA of all expression samples (colored by 1F/1L/2F/2L,
-#    with a 95% confidence ellipse per group)
+# PCA (Panel A data)
 # -----------------------------
-# Samples as rows, genes as columns for PCA
+# Samples as rows, genes as columns
 X = expr_log.T.values
 sample_names = expr_log.columns.tolist()
 groups = sample_groups.loc[sample_names].values
 
-# Center (mean-subtract) genes - matches typical prcomp()-style PCA on expression data
+# Center (mean-subtract) genes
 X_centered = X - X.mean(axis=0)
 
 pca = PCA(n_components=min(10, X_centered.shape[0] - 1))
@@ -291,108 +234,39 @@ explained = pca.explained_variance_ratio_ * 100
 pca_df = pd.DataFrame(pca_scores[:, :2], columns=['PC1', 'PC2'], index=sample_names)
 pca_df['Group'] = groups
 
-fig, ax = plt.subplots(figsize=(12, 10))
-plot_pca_panel(ax, pca_df, palette, group_order, explained, point_size=55)
-ax.set_title("Principal Component Analysis", **_font_kwargs("panel_title"))
-legend = ax.legend(title="Group", frameon=False)
-style_legend(legend)
-sns.despine()
-plt.tight_layout()
-plt.savefig(os.path.join(output_dir, "Figure2A_PCA_Combined.png"), dpi=1000, bbox_inches='tight')
-plt.savefig(os.path.join(output_dir, "Figure2A_PCA_Combined.pdf"), bbox_inches='tight')
-plt.show()
-
 
 # -----------------------------
-# 5. Panel B - Sample correlation heat map
+# Correlation matrix (Panel B data)
 # -----------------------------
 corr_matrix = expr_log.corr(method='pearson')
 
 
-# Order samples: group blocks in the order 1F, 1L, 2F, 2L, and within each
-# group, natural-sort the full sample name (so "..._R2" sorts after "..._R1"
-# and "10" sorts after "2", not before it - same idea as sort_samples() in
-# the R tximport scripts).
+# Order samples: group blocks in group_order, and within each group a natural
+# sort of the full sample name
 def natural_key(sample_name):
-    s = str(sample_name).strip()
-    grp = sample_groups[sample_name]
-    grp_rank = group_order.index(grp) if grp in group_order else len(group_order)
-    # pad every run of digits in the full name for natural sorting
-    padded = re.sub(r'\d+', lambda m: m.group().zfill(10), s)
-    return (grp_rank, padded)
+    grp_rank = group_order.index(sample_groups[sample_name])
+    return (grp_rank, natural_pad(sample_name))
 
 
 order = sorted(sample_groups.index, key=natural_key)
 corr_matrix = corr_matrix.loc[order, order]
 
 n_samples = corr_matrix.shape[0]
-annotate = n_samples <= 20   # auto-hide numeric annotations if too many samples to read
-
-fig, ax = plt.subplots(figsize=(max(8, n_samples * 0.25), max(10, n_samples * 0.25)))
-sns.heatmap(
-    corr_matrix,
-    cmap="RdBu_r",
-    vmin=corr_matrix.values.min(), vmax=1.0,
-    square=True,
-    annot=annotate, fmt=".2f" if annotate else None,
-    annot_kws={
-        "size": STYLE["heatmap_annot"]["size"],
-        "weight": STYLE["heatmap_annot"]["weight"],
-        "style": STYLE["heatmap_annot"]["style"],
-    } if annotate else None,
-    cbar_kws={
-        'label': 'Value',
-        'shrink': 0.4,     # smaller = shorter colorbar (fraction of ax height); try 0.3-0.5
-        'aspect': 25,       # bigger = thinner/narrower colorbar; try 20-40
-        'pad': 0.02         # space between heatmap and colorbar
-    },
-    linewidths=0.2, linecolor='white',
-    ax=ax
-)
-ax.set_title("Sample correlation", **_font_kwargs("panel_title"))
-ax.set_xlabel("")
-ax.set_ylabel("")
-plt.xticks(rotation=90)
-plt.yticks(rotation=0)
-apply_tick_style(ax)
-plt.tight_layout()
-plt.savefig(os.path.join(output_dir, "Figure2B_CorrelationHeatmap_Combined.png"), dpi=1000, bbox_inches='tight')
-plt.savefig(os.path.join(output_dir, "Figure2B_CorrelationHeatmap_Combined.pdf"), bbox_inches='tight')
-plt.show()
+annotate = n_samples <= 20   # hide numbers in the heat map if there are too many samples
 
 
 # -----------------------------
-# 6. Panel C - Violin plot of expression distribution per sample
+# Violin plot data (Panel C data)
 # -----------------------------
 plot_df = expr_log.reset_index().melt(id_vars=expr_log.index.name or 'index',
                                        var_name='Sample', value_name='log2(count+1)')
 plot_df['Group'] = plot_df['Sample'].map(sample_groups)
 
-# keep the same sample order as the correlation heatmap
 sample_order = order
-
-fig, ax = plt.subplots(figsize=(max(10, n_samples * 0.3), 6))
-sns.violinplot(
-    data=plot_df, x='Sample', y='log2(count+1)', order=sample_order,
-    hue='Group', hue_order=group_order, dodge=False, palette=palette, cut=0, linewidth=0.5,
-    ax=ax
-)
-ax.set_title("Expression distribution", **_font_kwargs("panel_title"))
-ax.set_xlabel("")
-ax.set_ylabel(r"$\log_2(\mathrm{count}+1)$", **_font_kwargs("axis_label"))
-plt.xticks(rotation=90)
-apply_tick_style(ax)
-legend = ax.legend(frameon=False, loc='upper right')
-style_legend(legend)
-sns.despine()
-plt.tight_layout()
-plt.savefig(os.path.join(output_dir, "Figure2C_ViolinPlot_Combined.png"), dpi=1000, bbox_inches='tight')
-plt.savefig(os.path.join(output_dir, "Figure2C_ViolinPlot_Combined.pdf"), bbox_inches='tight')
-plt.show()
 
 
 # -----------------------------
-# 7. Combined Figure 2 (A + B + C panels together)
+# Figure 1: A + B + C combined
 # -----------------------------
 fig = plt.figure(figsize=(22, 16))
 gs = fig.add_gridspec(2, 30, height_ratios=[1.1, 1.0],
@@ -431,8 +305,6 @@ sns.heatmap(
     linewidths=0.2, linecolor='white',
     ax=ax2
 )
-# no set_aspect / set_anchor here - let the heatmap fill the full gridspec cell,
-# so its height matches Panel A's height (same row) automatically
 ax2.tick_params(axis='x', labelrotation=90)
 ax2.tick_params(axis='y', labelrotation=0)
 apply_tick_style(ax2)
@@ -457,8 +329,8 @@ legend3 = ax3.legend(frameon=False, loc='upper right')
 style_legend(legend3)
 sns.despine(ax=ax3)
 
-plt.savefig(os.path.join(output_dir, "Figure2_Combined_All.png"), dpi=1000, bbox_inches='tight')
-plt.savefig(os.path.join(output_dir, "Figure2_Combined_All.pdf"), bbox_inches='tight')
-plt.show()
+plt.savefig(os.path.join(output_dir, "Figure1_Combined.png"), dpi=1000, bbox_inches='tight')
+plt.savefig(os.path.join(output_dir, "Figure1_Combined.pdf"), bbox_inches='tight')
+plt.close()
 
-print(f"\nDone. All Combined figures saved to: {output_dir}")
+print(f"\nDone. Figure 1 saved to: {output_dir}")
