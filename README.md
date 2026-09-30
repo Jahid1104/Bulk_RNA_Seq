@@ -15,7 +15,7 @@ Author: Md Jahid Hasan Jone
 | 3.1 | `3.1_make_tx2gene.R` | Builds the transcript-to-gene table from the GFF |
 | 3.2 | `3.2_tximport_combined.R` | Imports Salmon output with tximport and writes gene count and TPM tables |
 | 4 | `4_sample_relationship_analysis.py` | Combined figure: PCA, sample correlation heat map and expression violin plot |
-| 5 | `5_DESeq2_Analysis.R` | Differential expression with DESeq2 |
+| 5 | `5_DESeq2_Analysis.R` | Differential expression with DESeq2 for a list of comparisons, with volcano, MA, heat map, bar and Venn figures |
 | 6.1 | `6.1_GeneOntology.R` | GO enrichment |
 | 6.2 | `6.2_KEGG_Analysis.R` | KEGG enrichment |
 | 7 | `7_TF_Heatmap.R` | Transcription factor heatmap |
@@ -23,7 +23,7 @@ Author: Md Jahid Hasan Jone
 
 Helper scripts: `fastp_summary_from_json_files.py`, `Fastp_HTML_to_PowerPoint.py`, `collect_salmon_mapping_rate.py`, `submit_R.sh`.
 
-Steps 5 to 8 and the helper scripts are being added to this repository one at a time as they are finalized. Steps 1 to 4 are documented in full below.
+Steps 6 to 8 and the helper scripts are being added to this repository one at a time as they are finalized. Steps 1 to 5 are documented in full below.
 
 ## Requirements
 
@@ -31,6 +31,7 @@ Steps 5 to 8 and the helper scripts are being added to this repository one at a 
 - A conda environment containing `fastp` and `salmon`
 - Python 3 with `pandas`, `numpy`, `matplotlib`, `seaborn` and `scikit-learn`
 - R with these packages: `rtracklayer`, `dplyr`, `readr`, `stringr`, `tximport`
+- For step 5, also: `DESeq2` (Bioconductor), `ggplot2`, `ggrepel`, `pheatmap`, `RColorBrewer`, `ggVennDiagram`, `extrafont` and `patchwork`. The script installs any that are missing.
 
 ## Folder structure
 
@@ -87,6 +88,7 @@ The scripts contain placeholder paths written as `/.../.../`. Replace them with 
 - `INPUTDIR`, `OUTPUTDIR`, `RESULTDIR`, `seq_path`
 - the conda environment path in `conda activate ...`
 - the GFF, tx2gene and `quant.sf` paths in the R scripts
+- `counts_file`, `meta_file` and `output_dir` in `5_DESeq2_Analysis.R` (or use `file.choose()` for the two input files, see Step 5)
 
 The GFF (`gene_annotation.gff`) and the transcriptome fasta must come from the same ITAG4.0 release. If they don't, transcript IDs in Salmon output won't match the tx2gene table.
 
@@ -184,6 +186,69 @@ The script prints the group sizes and warns if every sample ends up in its own g
 **Fonts.** Sizes, weights and styles for all text are set in the `STYLE` dictionary at the top of the script.
 
 The figure is saved at 1000 dpi, and with many samples the PNG is large. Lower the `dpi` in the two `plt.savefig` calls if it runs out of memory.
+
+## Step 5: Differential expression (DESeq2)
+
+Run `5_DESeq2_Analysis.R` in R (RStudio or `Rscript`). It runs DESeq2 separately for every comparison in the `comparisons` list, then makes tables and figures for each comparison and for all comparisons together.
+
+**Experimental setup.** The script is written for this experiment:
+
+| Metadata column | Values |
+| --- | --- |
+| `Genotype` | `1` = CLN1466EA, `2` = NC123S |
+| `Tissue` | `F` = Flower, `L` = Leaf |
+| `Temperature` | `T0` = control, `T1` = heat |
+| `Time` | `24h`, `48h`, `72h` |
+
+Sample names follow `Genotype+Tissue_Temperature_Time_Replicate`, for example `2F_T0_48h_R1` (genotype 2, Flower, T0, 48h, replicate 1).
+
+**Input files.**
+
+- `gene_counts.csv` from Step 3.2 (gene IDs in the first column, samples in the other columns)
+- `Metadata.csv`: one row per sample, with the columns `Sample_ID`, `Genotype`, `Tissue`, `Temperature` and `Time`. Every `Sample_ID` must match a column name in `gene_counts.csv` exactly.
+
+There are two ways to give the script each file. Use one per file and comment out the other:
+
+1. **Direct path (default).** Replace `/.../.../` in `counts_file` and `meta_file` with your project path.
+2. **`file.choose()`.** A window opens so you can pick the file. Remove the `#` from the `message(...)` and `file.choose()` lines for that file and put a `#` in front of the direct-path line. This needs an interactive R session such as RStudio.
+
+Set `output_dir` to your `5_Results/5_DESeq2` folder. The script creates the `Tables` and `Figures` subfolders it needs.
+
+**Parameters** (section 3 of the script): adjusted p-value cutoff (`padj_cutoff = 0.05`), log2 fold-change cutoff (`lfc_cutoff = 2`), the minimum total reads for a gene to be kept in a comparison (`min_gene_count = 10`), and how many genes are labeled on volcano plots and shown in heat maps.
+
+**Editing the comparisons.** Each comparison is one line in the `comparisons` list (section 5):
+
+```r
+list(name = "Flower vs Leaf", group_col = "Tissue", group1 = "F", group2 = "L", filter = NULL)
+```
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Label used in file names, plots and tables. Must be unique and a valid file name. |
+| `group_col` | Metadata column that holds the two groups |
+| `group1` | Group compared against `group2`. A positive log2 fold change means higher in `group1`. |
+| `group2` | Reference group |
+| `filter` | `NULL` to use all samples, or a restriction such as `list(Tissue = "F", Time = "24h")` |
+
+Each comparison is its own DESeq2 model (`design = ~ group_col`) on the samples that pass the filter, so factors that are in neither `group_col` nor `filter` are pooled. To add a comparison, copy a line and change the fields; to remove one, delete the line or put a `#` in front of it. Every line needs a comma at the end except the last one.
+
+After changing the list, check these too:
+
+- `venn_comparisons` (section 10) and `final_comparisons` (near the end) must use the comparison names exactly as written in `name`. The Venn diagram has 6 colors, so it handles up to 6 comparisons.
+- The supplementary MA and volcano figures are 5 x 5 grids (25 comparisons, panels a to y). For more than 25 comparisons, increase `ncol` and `nrow` in the two `wrap_plots()` calls.
+
+The current list has 25 comparisons. For a different experiment, also edit the metadata column names used in the PCA and heat map in section 4 of the script (`Genotype`, `Tissue`, `Temperature`, `Time`).
+
+**Outputs** in `5_Results/5_DESeq2/`:
+
+- `Tables/Comparisons/<name>_DESeq2_results.csv`: full results for each comparison, with a `Regulation` column (`Up`, `Down` or `NS`)
+- `Tables/`: top genes per comparison, the top 10 genes overall for qPCR validation, the up/down gene counts per comparison, and legend files that match panel letters to comparison names
+- `Figures/Volcano_Plots/`, `Figures/MA_Plots/` and `Figures/Heatmaps/`: one figure per comparison (heat maps are skipped when a comparison has fewer than 2 DEGs)
+- `Figures/`: overall sample PCA, heat map of the most variable genes, bar plot of up/down gene counts, Venn diagram, and the combined MA and volcano figures
+
+All figures are TIFF files saved at 1000 dpi.
+
+**Fonts.** Figures use Times New Roman through `extrafont`. The first time you use `extrafont` on a computer, run `font_import()` once (it takes a few minutes). The script loads fonts with `loadfonts(device = "win")`, which is for Windows; on Mac or Linux use `device = "pdf"` and set `FONT` to a font you have (for example `"serif"`).
 
 ## Single-end reads
 

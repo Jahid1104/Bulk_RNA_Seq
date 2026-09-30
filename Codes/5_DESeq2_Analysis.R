@@ -3,7 +3,7 @@
 # Simple DESeq2 differential expression pipeline
 # ==========================================================
 # What this script does:
-#   1. Lets you pick the gene count csv and metadata csv with file.choose()
+#   1. Reads the gene count csv and metadata csv (direct path, or pick them with file.choose(); see section 2)
 #   2. Runs DESeq2 separately for each comparison listed in "comparisons" below
 #   3. Saves a results table (csv) for every comparison
 #   4. Saves Volcano plot, MA plot, and Heatmap for every comparison
@@ -14,6 +14,47 @@
 #
 # Sample_ID format reminder: 1F_T0_24h_R1
 #   1/2 = Genotype | F/L = Tissue | T0/T1 = Temperature | 24h/48h/72h = Time | R# = Replicate
+#
+# ----------------------------------------------------------
+# EXPERIMENTAL SETUP
+# ----------------------------------------------------------
+#   Genotype     1 = CLN1466EA, 2 = NC123S
+#   Tissue       F = Flower, L = Leaf
+#   Temperature  T0 = control, T1 = heat
+#   Time         24h, 48h, 72h
+#   Replicate    R1, R2, ... (biological replicates of each combination)
+# Metadata.csv has one row per sample with the columns:
+#   Sample_ID, Genotype, Tissue, Temperature, Time
+# Temperature is not used in the comparison list below (the "Heat vs Control"
+# line is commented out), so T0 and T1 samples are pooled inside each comparison.
+#
+# ----------------------------------------------------------
+# HOW TO EDIT THE COMPARISON LIST (section 5)
+# ----------------------------------------------------------
+# Each comparison is one line:
+#   list(name = "...", group_col = "...", group1 = "...", group2 = "...", filter = ...)
+#     name       label used in file names, plots and tables; must be unique and
+#                must not contain characters that are not allowed in file names (e.g. "/")
+#     group_col  metadata column that holds the two groups: Genotype, Tissue, Temperature or Time
+#     group1     value compared against group2 (positive log2 fold change = higher in group1)
+#     group2     reference value
+#     filter     NULL = use all samples, or keep only some samples, e.g.
+#                list(Tissue = "F", Time = "24h") = Flower samples at 24h only.
+#                Filter on any metadata column except group_col.
+# Each comparison runs its own DESeq2 model (design = ~ group_col) on the samples that
+# pass the filter. Factors that are in neither group_col nor filter are pooled.
+#
+# Add a comparison:    copy a line, change the fields, e.g.
+#   list(name = "Heat_Flower vs Control_Flower", group_col = "Temperature", group1 = "T1", group2 = "T0", filter = list(Tissue = "F"))
+# Remove a comparison: delete its line or put # in front of it.
+# Every line needs a comma at the end except the last one in the list.
+#
+# After changing the list, also check:
+#   - venn_comparisons (section 10) and final_comparisons (near the end) must use names
+#     exactly as written in "name" above, or the Venn / combined volcano figures fail.
+#   - The Venn diagram has 6 fill colors (set_colors), so it handles up to 6 comparisons.
+#   - The supplementary MA and volcano figures are 5 x 5 grids (25 comparisons, letters a-y).
+#     For more than 25 comparisons, increase ncol / nrow in the two wrap_plots() calls.
 # ==========================================================
 
 
@@ -23,10 +64,12 @@
 # -----------------------------
 # 0. Packages
 # -----------------------------
-if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-if (!requireNamespace("DESeq2",      quietly = TRUE)) BiocManager::install("DESeq2", update = FALSE, ask = FALSE)
+if (!requireNamespace("BiocManager", quietly = TRUE)) 
+  install.packages("BiocManager")
+if (!requireNamespace("DESeq2",      quietly = TRUE)) 
+  BiocManager::install("DESeq2", update = FALSE, ask = FALSE)
 
-cran_pkgs <- c("ggplot2", "ggrepel", "pheatmap", "RColorBrewer", "ggVennDiagram", "extrafont")
+cran_pkgs <- c("ggplot2", "ggrepel", "pheatmap", "RColorBrewer", "ggVennDiagram", "extrafont", "patchwork")
 to_install <- cran_pkgs[!sapply(cran_pkgs, requireNamespace, quietly = TRUE)]
 if (length(to_install) > 0) install.packages(to_install)
 
@@ -61,32 +104,48 @@ theme_set(theme_bw(base_family = FONT) + theme(text = element_text(family = FONT
 # -----------------------------
 # 2. Load data
 # -----------------------------
-# Set working directory where results will be saved  <- EDIT
+# Input files  <- EDIT
+# There are two ways to give each input file. Use ONE of them per file and comment out the other:
+#   Option 1 (default): direct path. Replace /.../.../ with the path to your project folder.
+#   Option 2: file.choose() opens a window to pick the file (needs an interactive R session such
+#             as RStudio). To use it, remove the # from the "message" and "file.choose()" lines
+#             and put a # in front of the direct-path line.
 
-setwd("R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/New_Name")
 
-message("Choose the GENE COUNT csv file (Gene_ID = 1st column, samples = other columns)")
+# Gene count csv (Gene_ID = 1st column, samples = other columns)
+# Option 1: direct path
+counts_file <- "/.../.../Bulk_RNA_seq/5_Results/3_tximport/gene_counts.csv"
+
+# Option 2: choose the file in a window
+#message("Choose the GENE COUNT csv file (Gene_ID = 1st column, samples = other columns)")
 #counts_file <- file.choose()
-counts_file <- "R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/New_Name/Results/3_tximport/gene_counts.csv"
 
-message("Choose the METADATA csv file (Sample_ID = 1st column)")
+# Metadata csv (Sample_ID = 1st column; columns Genotype, Tissue, Temperature, Time)
+# Option 1: direct path
+meta_file <- "/.../.../Bulk_RNA_seq/Metadata.csv"
+
+# Option 2: choose the file in a window
+#message("Choose the METADATA csv file (Sample_ID = 1st column)")
 #meta_file <- file.choose()
-meta_file <- "R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/Metadata.csv"
 
 
 counts <- read.csv(counts_file, row.names = 1, check.names = FALSE)
 counts <- as.matrix(round(counts))          # DESeq2 needs integer counts
-View(counts)
+#View(counts)
 
 
 meta <- read.csv(meta_file, row.names = "Sample_ID")
 meta <- meta[colnames(counts), , drop = FALSE]   # align sample order to the count matrix
-View(meta)
+#View(meta)
 
 
-output_dir <- "Results/5_DESeq2"              # <- EDIT: folder name for all outputs
+output_dir <- "/.../.../Bulk_RNA_seq/5_Results/5_DESeq2"   # <- EDIT: folder for all outputs
 dir.create(file.path(output_dir, "Tables"),  recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(output_dir, "Figures"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(output_dir, "Tables/Comparisons"),    recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(output_dir, "Figures/Heatmaps"),      recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(output_dir, "Figures/Volcano_Plots"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(output_dir, "Figures/MA_Plots"),      recursive = TRUE, showWarnings = FALSE)
 
 
 
@@ -215,22 +274,22 @@ run_comparison <- function(comp) {
   sub_meta <- sub_meta[sub_meta[[comp$group_col]] %in% c(comp$group1, comp$group2), , drop = FALSE]
   sub_meta[[comp$group_col]] <- factor(sub_meta[[comp$group_col]], levels = c(comp$group2, comp$group1))
   sub_counts <- counts[, rownames(sub_meta)]
-
+  
   dds <- DESeqDataSetFromMatrix(countData = sub_counts, colData = sub_meta,
-                                 design = as.formula(paste0("~", comp$group_col)))
+                                design = as.formula(paste0("~", comp$group_col)))
   dds <- dds[rowSums(counts(dds)) >= min_gene_count, ]
   dds <- DESeq(dds)
-
+  
   res <- results(dds, contrast = c(comp$group_col, comp$group1, comp$group2), alpha = padj_cutoff)
   res <- lfcShrink(dds, contrast = c(comp$group_col, comp$group1, comp$group2), res = res, type = "normal")
-
+  
   res_df <- as.data.frame(res)
   res_df$Gene <- rownames(res_df)
   res_df <- res_df[, c("Gene", setdiff(colnames(res_df), "Gene"))]
   res_df$Regulation <- "NS"
   res_df$Regulation[!is.na(res_df$padj) & res_df$padj < padj_cutoff & res_df$log2FoldChange >  lfc_cutoff] <- "Up"
   res_df$Regulation[!is.na(res_df$padj) & res_df$padj < padj_cutoff & res_df$log2FoldChange < -lfc_cutoff] <- "Down"
-
+  
   write.csv(res_df, file.path(output_dir, "Tables/Comparisons", paste0(comp$name, "_DESeq2_results.csv")), row.names = FALSE)
   list(dds = dds, res_df = res_df, name = comp$name, group_col = comp$group_col)
 }
@@ -241,16 +300,16 @@ make_volcano <- function(res_df, comp_name) {
   res_df$Regulation <- factor(res_df$Regulation, levels = c("Up", "Down", "NS"))
   top_genes <- res_df[!is.na(res_df$padj) & res_df$Regulation != "NS", ]
   top_genes <- head(top_genes[order(top_genes$padj), ], top_n_labels)
-
+  
   p <- ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = Regulation)) +
     geom_point(alpha = 0.6, size = 1.2) +
     scale_color_manual(values = c(Up = "firebrick", Down = "steelblue", NS = "grey70")) +
     geom_vline(xintercept = c(-lfc_cutoff, lfc_cutoff), linetype = "dashed") +
     geom_hline(yintercept = -log10(padj_cutoff), linetype = "dashed") +
     geom_text_repel(data = top_genes, aes(label = Gene), size = 3, fontface = "italic",
-                     max.overlaps = 20, show.legend = FALSE) +
+                    max.overlaps = 20, show.legend = FALSE) +
     labs(title = " ", x = "log2 Fold Change", y = "-log10(adjusted p-value)")
-
+  
   ggsave(file.path(output_dir, "Figures/Volcano_Plots", paste0("Volcano_", comp_name, ".tiff")),
          p, dpi = 1000, width = 8, height = 8, compression = "lzw")
 }
@@ -267,7 +326,7 @@ make_ma_plot <- function(res_df, comp_name) {
     scale_color_manual(values = c(Up = "firebrick", Down = "steelblue", NS = "grey70")) +
     geom_hline(yintercept = 0, linetype = "dashed") +
     labs(title = " ", x = "log2(mean expression + 1)", y = "log2 Fold Change")
-
+  
   ggsave(file.path(output_dir, "Figures/MA_Plots", paste0("MAplot_", comp_name, ".tiff")),
          p, dpi = 1000, width = 8, height = 8, compression = "lzw")
 }
@@ -278,17 +337,17 @@ make_ma_plot <- function(res_df, comp_name) {
 make_comparison_heatmap <- function(dds, res_df, comp_name, group_col) {
   sig_genes <- res_df$Gene[res_df$Regulation != "NS"]
   if (length(sig_genes) < 2) { message("  (skipping heatmap for ", comp_name, ": fewer than 2 DEGs)"); return(invisible(NULL)) }
-
+  
   vsd <- vst(dds, blind = FALSE)
   ordered_sig <- res_df$Gene[order(res_df$padj)]
   ordered_sig <- ordered_sig[ordered_sig %in% sig_genes]
   keep <- head(ordered_sig, top_n_heatmap)
-
+  
   mat <- assay(vsd)[keep, ]
   mat <- mat - rowMeans(mat)
   italic_labels <- as.expression(lapply(rownames(mat), function(g) bquote(italic(.(g)))))
   annotation_col <- as.data.frame(colData(dds)[, group_col, drop = FALSE])
-
+  
   tiff(file.path(output_dir, "Figures/Heatmaps", paste0("Heatmap_", comp_name, ".tiff")),
        width = 10, height = 10, units = "in", res = 1000, compression = "lzw")
   
@@ -299,7 +358,7 @@ make_comparison_heatmap <- function(dds, res_df, comp_name, group_col) {
            fontsize_col = 6, 
            fontfamily = FONT, 
            show_colnames = TRUE)
- 
+  
   dev.off()
 }
 
