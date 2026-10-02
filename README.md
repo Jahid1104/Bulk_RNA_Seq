@@ -10,20 +10,20 @@ Author: Md Jahid Hasan Jone
 
 | Step | Script | What it does |
 | --- | --- | --- |
-| 1 | `1_Bulk_RNA_Seq_fastp.sh` | Trims and filters raw reads with fastp; writes an HTML and JSON report per sample |
+| 1 | `1_Bulk_RNASeq_fastp.sh` | Trims and filters raw reads with fastp; writes an HTML and JSON report per sample |
 | 2 | `2_Salmon.sh` | Builds the Salmon index (if missing) and quantifies each sample |
 | 3.1 | `3.1_make_tx2gene.R` | Builds the transcript-to-gene table from the GFF |
 | 3.2 | `3.2_tximport_combined.R` | Imports Salmon output with tximport and writes gene count and TPM tables |
-| 4 | `4_sample_relationship_analysis.py` | Combined figure: PCA, sample correlation heat map and expression violin plot |
+| 4 | `4_Sample_Relationship_Analysis.py` | Combined figure: PCA, sample correlation heat map and expression violin plot |
 | 5 | `5_DESeq2_Analysis.R` | Differential expression with DESeq2 for a list of comparisons, with volcano, MA, heat map, bar and Venn figures |
-| 6.1 | `6.1_GeneOntology.R` | GO enrichment |
-| 6.2 | `6.2_KEGG_Analysis.R` | KEGG enrichment |
+| 6.1 | `6.1_GeneOntology.R` | GO enrichment (topGO) of the up- and down-regulated genes of each comparison, with a functional annotation figure and a functional enrichment figure |
+| 6.2 | `6.2_KEGG_Analysis.R` | KEGG pathway annotation and enrichment of the same DEGs, with the same two figures |
 | 7 | `7_TF_Heatmap.R` | Transcription factor heatmap |
 | 8 | `8_WGCNA.R` | WGCNA co-expression analysis |
 
-Helper scripts: `fastp_summary_from_json_files.py`, `Fastp_HTML_to_PowerPoint.py`, `collect_salmon_mapping_rate.py`, `submit_R.sh`.
+Helper scripts: `fastp_summary_from_json_files.ipynb`, `Fastp_HTML_to_PowerPoint.ipynb`, `collect_salmon_mapping_rate.py`, `submit_R.sh`.
 
-Steps 6 to 8 and the helper scripts are being added to this repository one at a time as they are finalized. Steps 1 to 5 are documented in full below.
+Steps 7 and 8 and the helper scripts are being added to this repository one at a time as they are finalized. Steps 1 to 6.2 are documented in full below.
 
 ## Requirements
 
@@ -32,6 +32,8 @@ Steps 6 to 8 and the helper scripts are being added to this repository one at a 
 - Python 3 with `pandas`, `numpy`, `matplotlib`, `seaborn` and `scikit-learn`
 - R with these packages: `rtracklayer`, `dplyr`, `readr`, `stringr`, `tximport`
 - For step 5, also: `DESeq2` (Bioconductor), `ggplot2`, `ggrepel`, `pheatmap`, `RColorBrewer`, `ggVennDiagram`, `extrafont` and `patchwork`. The script installs any that are missing.
+- For step 6.1, also: `topGO` (Bioconductor), `ggplot2`, `dplyr`, `tidyr`, `stringr`, `readr`, `purrr`, `tibble` and `ggtext`. The script installs any that are missing.
+- For step 6.2, also: `clusterProfiler` and `KEGGREST` (Bioconductor), `jsonlite`, `ragg` and the packages used in step 6.1 except `topGO`. The script installs any that are missing, and needs an internet connection the first time it runs (it downloads the KEGG pathway tables).
 
 ## Folder structure
 
@@ -50,13 +52,14 @@ Bulk_RNA_Seq/
 │   ├── 6.2_KEGG_Analysis.R
 │   ├── 7_TF_Heatmap.R
 │   ├── 8_WGCNA.R
-│   ├── fastp_summary_from_json_files.py
-│   ├── Fastp_HTML_to_PowerPoint.py
+│   ├── fastp_summary_from_json_files.ipynb
+│   ├── Fastp_HTML_to_PowerPoint.ipynb
 │   ├── collect_salmon_mapping_rate.py
 │   └── submit_R.sh
 ├── 2_References/
 │   ├── gene_annotation.gff
 │   ├── ITAG4.0_cDNA.fasta
+│   ├── ITAG4.0_goterms.txt
 │   ├── go-basic.obo
 │   └── query.ko.txt
 ├── 3_Raw_Reads/
@@ -89,6 +92,7 @@ The scripts contain placeholder paths written as `/.../.../`. Replace them with 
 - the conda environment path in `conda activate ...`
 - the GFF, tx2gene and `quant.sf` paths in the R scripts
 - `counts_file`, `meta_file` and `output_dir` in `5_DESeq2_Analysis.R` (or use `file.choose()` for the two input files, see Step 5)
+- `go_file`, `obo_file`, `deseq_dir` and `output_dir` in `6.1_GeneOntology.R`, and `ko_file`, `deseq_dir` and `output_dir` in `6.2_KEGG_Analysis.R` (or use `file.choose()` for the input files, see Step 6)
 
 The GFF (`gene_annotation.gff`) and the transcriptome fasta must come from the same ITAG4.0 release. If they don't, transcript IDs in Salmon output won't match the tx2gene table.
 
@@ -249,6 +253,70 @@ The current list has 25 comparisons. For a different experiment, also edit the m
 All figures are TIFF files saved at 1000 dpi.
 
 **Fonts.** Figures use Times New Roman through `extrafont`. The first time you use `extrafont` on a computer, run `font_import()` once (it takes a few minutes). The script loads fonts with `loadfonts(device = "win")`, which is for Windows; on Mac or Linux use `device = "pdf"` and set `FONT` to a font you have (for example `"serif"`).
+
+## Step 6: GO and KEGG enrichment
+
+Both scripts read the DESeq2 result tables written by Step 5 (`5_Results/5_DESeq2/Tables/Comparisons/<name>_DESeq2_results.csv`). A gene is a DEG when `padj` is below `PADJ_CUTOFF` (0.05) and its absolute log2 fold change is above `LFC_CUTOFF` (1), set in section 2 of each script. Step 5 calls Up and Down genes with `lfc_cutoff = 2`, so set `LFC_CUTOFF` to 2 in Step 6 if you want the same DEGs.
+
+**Input files.**
+
+| File | Used by | What it is |
+| --- | --- | --- |
+| `2_References/ITAG4.0_goterms.txt` | 6.1 | One gene per line: gene ID, a tab, then comma-separated GO IDs (for example `Solyc01g005000.2` then `GO:0016831,GO:0019752`). Genes without GO terms can have the ID only. |
+| `2_References/go-basic.obo` | 6.1 | GO ontology file, used for term names and for the molecular function / cellular component / biological process split |
+| `2_References/query.ko.txt` | 6.2 | KAAS output that links each gene ID to a K number |
+| `5_Results/5_DESeq2/Tables/Comparisons/` | 6.1, 6.2 | DESeq2 result tables from Step 5 |
+
+As in Step 5, each input file can be given by a direct path (default) or picked in a window with `file.choose()`. Use one per file and comment out the other. For `deseq_dir`, the `file.choose()` option asks you to pick any one DESeq2 result csv and uses the folder it is in.
+
+**Editing the comparisons.** Both scripts take the comparisons from a `comparison_names` vector in section 3 (6.1) or section 2 (6.2):
+
+```r
+comparison_names <- c(
+  "CLN1466EA vs NC123S",
+  "Flower vs Leaf"
+)
+```
+
+Each name must match `name` in the `comparisons` list of `5_DESeq2_Analysis.R` exactly, because the script reads `<name>_DESeq2_results.csv`. Letters a, b, c and so on are given in the order listed, and they label the figure panels. To add a comparison, add a line; to remove one, delete the line or put a `#` in front of it. Every line needs a comma at the end except the last one. The current list has 8 comparisons. Figure 1 has one row per comparison and Figure 2 one column per comparison, so after changing the number, adjust `ANNOTATION_HEIGHT` and `ENRICHMENT_WIDTH` in 6.1, or `FIG1_HEIGHT` and `FIG2_WIDTH` in 6.2. Use the same list in both scripts so the panel letters agree.
+
+### Step 6.1: Gene Ontology (`6.1_GeneOntology.R`)
+
+Run it in R (RStudio or `Rscript`). For each comparison, the up- and down-regulated genes are tested separately for each GO category (MF, CC, BP) with topGO (`weight01` algorithm, Fisher test, minimum node size 5). The background is all genes in the DESeq2 table that have a GO annotation. p-values are adjusted with Benjamini-Hochberg and called significant at FDR 0.05.
+
+Written to `5_Results/6.1_GO/`:
+
+- `Individual_Results/`: the background, up and down gene lists and the GO result table for each comparison, direction and category
+- `GO_All_Results.csv` and `GO_Significant_FDR_0.05.csv`: results for all comparisons combined
+- `Functional_Annotation_Top10.csv` and `Functional_Enrichment_Top30.csv`: the terms shown in the two figures
+- `Functional_Annotation_Figure_Data.csv`, `Functional_Enrichment_Figure_Data.csv` and `DEG_Summary_All_Comparisons.csv`: plotting data and DEG counts
+- `Comparison_Key.csv`: which letter is which comparison
+- `Figures/Figure_Functional_Annotation_Top10.tiff` (and `.pdf`): top 10 GO terms per category, with up (red) and down (steel blue) gene counts for each comparison
+- `Figures/Figure_Functional_Enrichment_Top30.tiff` (and `.pdf`): top 30 GO terms (10 per category), bar length = number of DEGs, color = -log10(FDR)
+- `sessionInfo.txt`
+
+Thresholds, the number of terms shown, fonts and figure sizes are set in section 2. The TIFF files are saved at 1000 dpi.
+
+### Step 6.2: KEGG pathways (`6.2_KEGG_Analysis.R`)
+
+Run it in R. The script attaches K numbers from `query.ko.txt` to the DEGs, maps them to KEGG pathways, and keeps the five main KEGG categories (Metabolism, Genetic Information Processing, Environmental Information Processing, Cellular Processes, Organismal Systems). It downloads the pathway tables from KEGG on the first run and saves them in the output folder, so later runs work from the saved copies.
+
+Gene IDs in `query.ko.txt` and in the DESeq2 tables can differ by a trailing transcript number (`Solyc10g079470.3.1` and `Solyc10g079470.3`). The script tries a few ways of trimming the IDs, keeps the one that matches the DESeq2 IDs best, and prints the match rate. Check that number the first time you run it.
+
+Figure 2 uses fold enrichment, calculated directly as (DEGs in the pathway / all DEGs) / (background genes in the pathway / all background genes). A statistical `enrichKEGG()` test is also run and saved, but the figure does not depend on it, so every selected pathway is always shown.
+
+Written to `5_Results/6.2_KEGG/`:
+
+- `01_KO_annotation/`: gene to K number table
+- `02_Annotated_DESeq2/`: each DESeq2 table with K numbers and KEGG categories added
+- `03_DEG_tables/`: all, up and down DEGs for each comparison
+- `04_KEGG_enrichment/`: fold enrichment for all comparisons and the `enrichKEGG()` result for each comparison
+- `Pathway_Ranking_AllComparisons.csv`, `Top_Pathways_Figure1.csv` and `Top_Pathways_Figure2.csv`
+- `Comparison_Key.csv`: which letter is which comparison
+- `Figure1_Functional_Annotation.tiff`: top 30 pathways with up and down DEG counts
+- `Figure2_Functional_Enrichment.tiff`: top 20 pathways by fold enrichment
+
+The number of pathways shown (`TOP_N_ANNOTATION`, `TOP_N_ENRICHMENT`), colors, fonts and figure sizes are set in section 2.
 
 ## Single-end reads
 

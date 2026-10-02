@@ -1,21 +1,15 @@
-# ============================================================
-# TOMATO GO ANALYSIS
-# ITAG4.0 GO TERMS + GO OBO + MULTIPLE DESEQ2 FILES
-# ============================================================
+# ==========================================================
+# 6.1_GeneOntology.R by Md Jahid Hasan Jone
+# GO enrichment (topGO) of the DESeq2 comparisons from step 5
+# ==========================================================
+# What this script does:
+#   1. Reads the ITAG4.0 GO terms file, the GO OBO file and the DESeq2 result csv of every comparison (a-h)
+#   2. Runs GO enrichment for the up- and down-regulated genes of each comparison
+#   3. Saves the individual and the combined GO enrichment results (csv), and the top 30 GO terms
+#   4. Saves the functional annotation results and the csv files used for plotting
+#   5. Saves two figures (1000 dpi TIFF): functional annotation and functional enrichment
 #
-# OUTPUT:
-#
-# 1. Individual GO enrichment results
-# 2. Combined GO enrichment results
-# 3. Top 30 GO enrichment terms
-# 4. Functional annotation results
-# 5. Functional annotation figure
-# 6. Functional enrichment figure
-# 7. CSV files containing plotting data
-# 8. 1000 dpi TIFF figures
-#
-# FIGURE 1:
-# Functional annotation
+# FIGURE 1: Functional annotation
 #   - 8 rows = comparisons (a-h, letters on the right)
 #   - 3 columns = Molecular Function, Cellular Component, Biological Process
 #   - Vertical bars, GO term labels read vertically (parallel to the bars)
@@ -23,8 +17,7 @@
 #   - DOWN = steelblue
 #   - Numbers = UP/DOWN genes
 #
-# FIGURE 2:
-# Functional enrichment
+# FIGURE 2: Functional enrichment
 #   - Top 30 GO terms (top 10 per category, grouped MF / CC / BP)
 #   - 8 comparison columns (a-h)
 #   - Horizontal bars
@@ -32,14 +25,27 @@
 #   - Color = -log10(FDR/Q value)
 #   - Number = gene count
 #
-# All input/output paths are hardcoded below (no file-choose dialogs).
-#
-# ============================================================
+# ----------------------------------------------------------
+# HOW TO EDIT THE SCRIPT
+# ----------------------------------------------------------
+#   Paths (section 3): replace /.../.../ with the path to your project folder. Each input
+#     file can also be picked in a window with file.choose() (see the Option 2 lines).
+#   Comparisons (section 3): list the comparison names in "comparison_names". Each name must
+#     match "name" in the comparisons list of 5_DESeq2_Analysis.R exactly, because the script
+#     reads <name>_DESeq2_results.csv. Letters a, b, c ... follow the order of the list.
+#       Add a comparison:    add a line with its name
+#       Remove a comparison: delete its line or put # in front of it
+#       Every line needs a comma at the end except the last one in the list.
+#   After changing the number of comparisons, also check the figure sizes in section 2:
+#       ANNOTATION_HEIGHT (Figure 1 has one row per comparison)
+#       ENRICHMENT_WIDTH  (Figure 2 has one column per comparison)
+#   DEG thresholds, number of GO terms, fonts and figure sizes are set in section 2.
+# ==========================================================
 
 
-# ============================================================
-# 1. PACKAGES
-# ============================================================
+# -----------------------------
+# 1. Packages
+# -----------------------------
 
 cran_packages <- c(
   "ggplot2",
@@ -53,29 +59,22 @@ cran_packages <- c(
 )
 
 for (p in cran_packages) {
-  
   if (!requireNamespace(p, quietly = TRUE)) {
     install.packages(p)
   }
-  
 }
-
 
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
 }
 
-
 if (!requireNamespace("topGO", quietly = TRUE)) {
-  
   BiocManager::install(
     "topGO",
     ask = FALSE,
     update = FALSE
   )
-  
 }
-
 
 library(ggplot2)
 library(dplyr)
@@ -86,7 +85,6 @@ library(purrr)
 library(tibble)
 library(topGO)
 library(ggtext)
-
 
 # ------------------------------------------------------------
 # topGO (via AnnotationDbi/Biobase) defines its own select()
@@ -100,25 +98,23 @@ select <- dplyr::select
 filter <- dplyr::filter
 
 
-# ============================================================
-# 2. USER SETTINGS
-# ============================================================
+# -----------------------------
+# 2. User settings
+# -----------------------------
 
 # ------------------------------------------------------------
 # DEG thresholds
 # ------------------------------------------------------------
 
-PADJ_CUTOFF <- 0.05
+PADJ_CUTOFF <- 0.05   # <- EDIT: adjusted p-value cutoff for a significant DEG
 
-LFC_CUTOFF <- 1
-
+LFC_CUTOFF <- 1       # <- EDIT: |log2 fold change| cutoff (1 = 2-fold). Step 5 uses lfc_cutoff = 2 for its Up/Down calls; set the same value here if you want the same DEGs
 
 # ------------------------------------------------------------
 # Number of GO terms for functional annotation
 # ------------------------------------------------------------
 
 TOP_ANNOTATION_TERMS <- 10
-
 
 # ------------------------------------------------------------
 # Number of GO terms for functional enrichment
@@ -128,7 +124,6 @@ TOP_ANNOTATION_TERMS <- 10
 TOP_ENRICHMENT_TERMS_PER_CATEGORY <- 10
 
 TOP_ENRICHMENT_TERMS <- TOP_ENRICHMENT_TERMS_PER_CATEGORY * 3
-
 
 # ------------------------------------------------------------
 # Publication figure font sizes
@@ -154,40 +149,39 @@ FONT_NUMBER <- 5   # UP/DOWN count labels on the functional annotation figure (n
 
 FONT_TITLE <- 14
 
-
 # ------------------------------------------------------------
 # Functional enrichment figure fonts/sizing
 # Matched directly to the KEGG functional enrichment figure
-# (6_2_KEGG_Analysis.R, Figure 2) so the two look like a pair.
+# (6.2_KEGG_Analysis.R, Figure 2) so the two look like a pair.
 # ------------------------------------------------------------
 
 FONT_BASE_ENRICH    <- 9    # overall base size
 FONT_AXIS_ENRICH    <- 9    # numeric x-axis (gene count) text
 FONT_GO_ENRICH      <- 10   # GO term labels (bold), same role as KEGG's FONT_PATHWAY
-FONT_STRIP_ENRICH   <- 12   # comparison a-h strip labels
+FONT_STRIP_ENRICH   <- 12   # comparison letter strip labels (a, b, c ...)
 FONT_LEGEND_ENRICH  <- 9
 FONT_NUMBER_ENRICH  <- 2.6  # gene-count data labels at the end of each bar
-
 
 # ------------------------------------------------------------
 # Figure dimensions
 # ------------------------------------------------------------
 
+# Figure 1 has one row per comparison: increase ANNOTATION_HEIGHT if you add comparisons
+# Figure 2 has one column per comparison: increase ENRICHMENT_WIDTH if you add comparisons
+
 ANNOTATION_WIDTH <- 18
 
-ANNOTATION_HEIGHT <- 22
+ANNOTATION_HEIGHT <- 22   # <- EDIT (8 comparisons)
 
-ENRICHMENT_WIDTH <- 18   # matches KEGG Figure 2 (FIG2_WIDTH)
+ENRICHMENT_WIDTH <- 18   # <- EDIT (8 comparisons); matches KEGG Figure 2 (FIG2_WIDTH)
 
 ENRICHMENT_HEIGHT <- 12   # matches KEGG Figure 2 (FIG2_HEIGHT)
-
 
 # ------------------------------------------------------------
 # TIFF resolution
 # ------------------------------------------------------------
 
 FIG_DPI <- 1000
-
 
 # ------------------------------------------------------------
 # GO category display order (left to right / top to bottom)
@@ -205,7 +199,6 @@ ONTOLOGY_LABELS <- c(
   BP = "Biological Process"
 )
 
-
 # ------------------------------------------------------------
 # Shorten "biological process" / "cellular component" /
 # "molecular function" to BP / CC / MF wherever they appear
@@ -213,29 +206,26 @@ ONTOLOGY_LABELS <- c(
 # ------------------------------------------------------------
 
 shorten_go_name <- function(x) {
-  
   x <- str_replace_all(
     x,
     regex("biological_process|biological process", ignore_case = TRUE),
     "BP"
   )
-  
+
   x <- str_replace_all(
     x,
     regex("cellular_component|cellular component", ignore_case = TRUE),
     "CC"
   )
-  
+
   x <- str_replace_all(
     x,
     regex("molecular_function|molecular function", ignore_case = TRUE),
     "MF"
   )
-  
-  x
-  
-}
 
+  x
+}
 
 # ------------------------------------------------------------
 # Trim a GO term name down to its first 3 words, adding "..."
@@ -243,32 +233,23 @@ shorten_go_name <- function(x) {
 # ------------------------------------------------------------
 
 truncate_go_name <- function(x, max_words = 3) {
-  
   words <- strsplit(x, "\\s+")
-  
+
   vapply(
     words,
     function(w) {
-      
       if (length(w) > max_words) {
-        
         paste0(
           paste(w[seq_len(max_words)], collapse = " "),
           " ..."
         )
-        
       } else {
-        
         paste(w, collapse = " ")
-        
       }
-      
     },
     character(1)
   )
-  
 }
-
 
 # ------------------------------------------------------------
 # Colors used to tell MF / CC / BP terms apart on the
@@ -281,7 +262,6 @@ ONTOLOGY_COLORS <- c(
   BP = "#7570b3"
 )
 
-
 # ------------------------------------------------------------
 # Build the two-line GO term label (name + GO ID) used on
 # both figures. `colored = TRUE` wraps the label in a markdown
@@ -290,18 +270,16 @@ ONTOLOGY_COLORS <- c(
 # ------------------------------------------------------------
 
 make_go_label <- function(GO_name, GO_ID, Ontology, colored = FALSE) {
-  
   Ontology <- as.character(Ontology)
-  
+
   name_txt <-
     truncate_go_name(
       shorten_go_name(GO_name)
     )
-  
+
   if (colored) {
-    
     col <- ONTOLOGY_COLORS[Ontology]
-    
+
     paste0(
       "<span style='color:", col, "'>",
       name_txt,
@@ -309,57 +287,83 @@ make_go_label <- function(GO_name, GO_ID, Ontology, colored = FALSE) {
       GO_ID,
       "</span>"
     )
-    
   } else {
-    
     paste0(
       name_txt,
       "\n",
       GO_ID
     )
-    
   }
-  
 }
 
 
-# ============================================================
-# 3. ITAG GO FILE, OBO FILE, DESEQ2 FILES, OUTPUT FOLDER
-# ============================================================
-#
-# All paths are fixed below. Edit these if your file locations
-# change.
-#
-# ============================================================
+# -----------------------------
+# 3. ITAG GO file, OBO file, DESeq2 files, output folder
+# -----------------------------
+# Input files  <- EDIT
+# There are two ways to give each input file. Use ONE of them per file and comment out the other:
+#   Option 1 (default): direct path. Replace /.../.../ with the path to your project folder.
+#   Option 2: file.choose() opens a window to pick the file (needs an interactive R session such
+#             as RStudio). To use it, remove the # from the "message" and "file.choose()" lines
+#             and put a # in front of the direct-path line.
 
-go_file <- "R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/Reference/ITAG4.0_goterms.txt"
+# ITAG4.0 GO terms file (gene ID in column 1, comma-separated GO IDs in column 2, tab separated)
+# Option 1: direct path
+go_file <- "/.../.../Bulk_RNA_seq/2_References/ITAG4.0_goterms.txt"
 
-obo_file <- "R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/Reference/go-basic.obo"
+# Option 2: choose the file in a window
+#message("Choose the ITAG4.0 GO TERMS file (ITAG4.0_goterms.txt)")
+#go_file <- file.choose()
 
-deseq_dir <- "R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/New_Name/Results/5_DESeq2/Tables/Comparisons"
+# GO OBO file
+# Option 1: direct path
+obo_file <- "/.../.../Bulk_RNA_seq/2_References/go-basic.obo"
 
-output_dir <- "R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/New_Name/Results/6_GO"
+# Option 2: choose the file in a window
+#message("Choose the GO OBO file (go-basic.obo)")
+#obo_file <- file.choose()
+
+# Folder with the DESeq2 result csv files from step 5 (Tables/Comparisons)
+# Option 1: direct path
+deseq_dir <- "/.../.../Bulk_RNA_seq/5_Results/5_DESeq2/Tables/Comparisons"
+
+# Option 2: choose ANY ONE of the DESeq2 result csv files; the script uses the folder it is in
+#message("Choose any ONE DESeq2 result csv file (the script uses its folder)")
+#deseq_dir <- dirname(file.choose())
+
+# Output folder  <- EDIT
+output_dir <- "/.../.../Bulk_RNA_seq/5_Results/6.1_GO"
 
 
 # ------------------------------------------------------------
-# DESeq2 comparison files, in letter order a - h
+# Comparisons  <- EDIT
 # ------------------------------------------------------------
+# One name per comparison, written exactly as "name" in the comparisons list of
+# 5_DESeq2_Analysis.R. The script reads <name>_DESeq2_results.csv from deseq_dir.
+# Letters a, b, c ... are given in the order listed here; they are the panel letters
+# on the figures and in Comparison_Key.csv.
+# Add a comparison: add a line. Remove one: delete the line or put # in front of it.
+# Every line needs a comma at the end except the last one.
+# After changing the number of comparisons, check ANNOTATION_HEIGHT and ENRICHMENT_WIDTH (section 2).
 
-deseq_filenames <- c(
-  a = "CLN1466EA vs NC123S_DESeq2_results.csv",
-  b = "Flower vs Leaf_DESeq2_results.csv",
-  c = "CLN1466EA_Flower vs NC123S_Flower_DESeq2_results.csv",
-  d = "CLN1466EA_Flower_24h vs NC123S_Flower_24h_DESeq2_results.csv",
-  e = "CLN1466EA_Flower_72h vs NC123S_Flower_72h_DESeq2_results.csv",
-  f = "CLN1466EA_Leaf vs NC123S_Leaf_DESeq2_results.csv",
-  g = "CLN1466EA_Leaf_24h vs NC123S_Leaf_24h_DESeq2_results.csv",
-  h = "CLN1466EA_Leaf_72h vs NC123S_Leaf_72h_DESeq2_results.csv"
+comparison_names <- c(
+  "CLN1466EA vs NC123S",
+  "Flower vs Leaf",
+  "CLN1466EA_Flower vs NC123S_Flower",
+  "CLN1466EA_Flower_24h vs NC123S_Flower_24h",
+  "CLN1466EA_Flower_72h vs NC123S_Flower_72h",
+  "CLN1466EA_Leaf vs NC123S_Leaf",
+  "CLN1466EA_Leaf_24h vs NC123S_Leaf_24h",
+  "CLN1466EA_Leaf_72h vs NC123S_Leaf_72h"
 )
+
+deseq_filenames <- paste0(comparison_names, "_DESeq2_results.csv")
+
+names(deseq_filenames) <- letters[seq_along(comparison_names)]
 
 deseq_files <- file.path(deseq_dir, deseq_filenames)
 
 names(deseq_files) <- names(deseq_filenames)
-
 
 if (!file.exists(go_file)) {
   stop("ITAG GO terms file not found:\n", go_file)
@@ -378,7 +382,6 @@ if (length(missing_deseq) > 0) {
   )
 }
 
-
 cat(
   "\nNumber of DESeq2 files:",
   length(deseq_files),
@@ -386,9 +389,9 @@ cat(
 )
 
 
-# ============================================================
-# 4. OUTPUT DIRECTORIES
-# ============================================================
+# -----------------------------
+# 4. Output directories
+# -----------------------------
 
 dir.create(
   output_dir,
@@ -396,14 +399,11 @@ dir.create(
   showWarnings = FALSE
 )
 
-
 individual_dir <-
-  
   file.path(
     output_dir,
     "Individual_Results"
   )
-
 
 dir.create(
   individual_dir,
@@ -411,14 +411,11 @@ dir.create(
   showWarnings = FALSE
 )
 
-
 figure_dir <-
-  
   file.path(
     output_dir,
     "Figures"
   )
-
 
 dir.create(
   figure_dir,
@@ -427,9 +424,9 @@ dir.create(
 )
 
 
-# ============================================================
-# 5. READ ITAG GO FILE
-# ============================================================
+# -----------------------------
+# 5. Read ITAG GO file
+# -----------------------------
 #
 # Your file has lines like:
 #
@@ -441,32 +438,26 @@ dir.create(
 #
 # We read the file line-by-line.
 #
-# ============================================================
+# -----------------------------
 
 cat("\nReading ITAG GO file...\n")
 
-
 raw_lines <-
-  
   readLines(
     go_file,
     warn = FALSE
   )
 
-
 raw_lines <-
-  
   raw_lines[
     nzchar(
       trimws(raw_lines)
     )
   ]
 
-
 # Remove comment lines
 
 raw_lines <-
-  
   raw_lines[
     !grepl(
       "^#",
@@ -474,160 +465,121 @@ raw_lines <-
     )
   ]
 
-
 gene_vector <-
   character(
     length(raw_lines)
   )
-
 
 go_vector <-
   character(
     length(raw_lines)
   )
 
-
 for (i in seq_along(raw_lines)) {
-  
   pieces <-
-    
     strsplit(
       raw_lines[i],
       "\t",
       fixed = TRUE
     )[[1]]
-  
-  
+
   gene_vector[i] <-
-    
     trimws(
       pieces[1]
     )
-  
-  
+
   if (length(pieces) >= 2) {
-    
     go_vector[i] <-
-      
       trimws(
         paste(
           pieces[-1],
           collapse = "\t"
         )
       )
-    
   } else {
-    
     go_vector[i] <- ""
-    
   }
-  
 }
 
-
 go_raw <-
-  
   tibble(
-    
     Gene =
       gene_vector,
-    
     GO =
       go_vector
-    
   )
 
 
-# ============================================================
-# 6. CLEAN GENE IDs
-# ============================================================
+# -----------------------------
+# 6. Clean gene IDs
+# -----------------------------
 
 go_raw$Gene <-
-  
   str_extract(
     go_raw$Gene,
     "Solyc[0-9]{2}g[0-9]+\\.[0-9]+"
   )
 
-
 go_raw <-
-  
   go_raw %>%
-  
   filter(
     !is.na(Gene)
   )
 
 
-# ============================================================
-# 7. CREATE gene2GO
-# ============================================================
+# -----------------------------
+# 7. Create gene2GO
+# -----------------------------
 
 gene2GO <- list()
 
-
 for (i in seq_len(nrow(go_raw))) {
-  
   gene <- go_raw$Gene[i]
-  
+
   go_string <- go_raw$GO[i]
-  
-  
+
   if (
     is.na(go_string) ||
     go_string == ""
   ) {
     next
   }
-  
-  
+
   terms <-
-    
     unlist(
       strsplit(
         go_string,
         ","
       )
     )
-  
-  
+
   terms <-
-    
     trimws(
       terms
     )
-  
-  
+
   terms <-
-    
     terms[
       grepl(
         "^GO:[0-9]{7}$",
         terms
       )
     ]
-  
-  
+
   if (length(terms) == 0) {
     next
   }
-  
-  
+
   gene2GO[[gene]] <-
-    
     unique(
       terms
     )
-  
 }
 
-
 gene2GO <-
-  
   gene2GO[
     lengths(gene2GO) > 0
   ]
-
 
 cat(
   "Genes with GO annotations:",
@@ -635,94 +587,71 @@ cat(
   "\n"
 )
 
-
 if (length(gene2GO) == 0) {
-  
   stop(
     "No valid gene-GO associations were found."
   )
-  
 }
 
 
-# ============================================================
-# 8. READ OBO FILE
-# ============================================================
+# -----------------------------
+# 8. Read OBO file
+# -----------------------------
 
 cat(
   "\nReading OBO file...\n"
 )
 
-
 obo_lines <-
-  
   readLines(
     obo_file,
     warn = FALSE
   )
 
-
 term_start <-
-  
   which(
     trimws(
       obo_lines
     ) == "[Term]"
   )
 
-
 obo_list <- list()
 
-
 for (i in seq_along(term_start)) {
-  
   start <- term_start[i]
-  
-  
+
   if (i < length(term_start)) {
-    
     end <-
       term_start[i + 1] - 1
-    
   } else {
-    
     end <-
       length(obo_lines)
-    
   }
-  
-  
+
   block <-
     obo_lines[start:end]
-  
-  
+
   id_line <-
-    
     grep(
       "^id:",
       block,
       value = TRUE
     )
-  
-  
+
   name_line <-
-    
     grep(
       "^name:",
       block,
       value = TRUE
     )
-  
-  
+
   namespace_line <-
-    
     grep(
       "^namespace:",
       block,
       value = TRUE
     )
-  
-  
+
   if (
     length(id_line) == 0 ||
     length(name_line) == 0 ||
@@ -730,37 +659,30 @@ for (i in seq_along(term_start)) {
   ) {
     next
   }
-  
-  
+
   go_id <-
-    
     sub(
       "^id:\\s*",
       "",
       id_line[1]
     )
-  
-  
+
   go_name <-
-    
     sub(
       "^name:\\s*",
       "",
       name_line[1]
     )
-  
-  
+
   namespace <-
-    
     sub(
       "^namespace:\\s*",
       "",
       namespace_line[1]
     )
-  
-  
+
   # Remove obsolete GO terms
-  
+
   if (
     any(
       grepl(
@@ -771,70 +693,50 @@ for (i in seq_along(term_start)) {
   ) {
     next
   }
-  
-  
+
   obo_list[[
     length(obo_list) + 1
   ]] <-
-    
     tibble(
-      
       GO_ID =
         go_id,
-      
       GO_name =
         go_name,
-      
       namespace =
         namespace
-      
     )
-  
 }
 
-
 go_info <-
-  
   bind_rows(
     obo_list
   )
 
 
-# ============================================================
-# 9. BROAD GO CATEGORIES
-# ============================================================
+# -----------------------------
+# 9. Broad GO categories
+# -----------------------------
 
 go_info <-
-  
   go_info %>%
-  
   mutate(
-    
     Ontology = case_when(
-      
       namespace ==
         "biological_process" ~
         "BP",
-      
       namespace ==
         "cellular_component" ~
         "CC",
-      
       namespace ==
         "molecular_function" ~
         "MF",
-      
       TRUE ~
         NA_character_
-      
     )
-    
   ) %>%
-  
   filter(
     !is.na(Ontology)
   )
-
 
 cat(
   "GO terms:",
@@ -843,72 +745,58 @@ cat(
 )
 
 
-# ============================================================
-# 10. SPLIT gene2GO BY ONTOLOGY
-# ============================================================
+# -----------------------------
+# 10. Split gene2GO by ontology
+# -----------------------------
 
 gene2GO_BP <-
-  
   lapply(
     gene2GO,
     function(x) {
-      
       intersect(
         x,
         go_info$GO_ID[
           go_info$Ontology == "BP"
         ]
       )
-      
     }
   )
 
-
 gene2GO_CC <-
-  
   lapply(
     gene2GO,
     function(x) {
-      
       intersect(
         x,
         go_info$GO_ID[
           go_info$Ontology == "CC"
         ]
       )
-      
     }
   )
 
-
 gene2GO_MF <-
-  
   lapply(
     gene2GO,
     function(x) {
-      
       intersect(
         x,
         go_info$GO_ID[
           go_info$Ontology == "MF"
         ]
       )
-      
     }
   )
-
 
 gene2GO_BP <-
   gene2GO_BP[
     lengths(gene2GO_BP) > 0
   ]
 
-
 gene2GO_CC <-
   gene2GO_CC[
     lengths(gene2GO_CC) > 0
   ]
-
 
 gene2GO_MF <-
   gene2GO_MF[
@@ -916,72 +804,56 @@ gene2GO_MF <-
   ]
 
 
-# ============================================================
-# 11. READ DESEQ2 RESULT
-# ============================================================
+# -----------------------------
+# 11. Read DESeq2 result
+# -----------------------------
 
 read_deseq <- function(file) {
-  
-  
   cat(
     "\nReading:",
     basename(file),
     "\n"
   )
-  
-  
+
   # ----------------------------------------------------------
   # Try tab-delimited first
   # ----------------------------------------------------------
-  
+
   dat <-
-    
     tryCatch(
-      
       read.delim(
         file,
         check.names = FALSE,
         stringsAsFactors = FALSE
       ),
-      
       error =
         function(e) NULL
-      
     )
-  
-  
+
   # ----------------------------------------------------------
   # If only one column, try comma
   # ----------------------------------------------------------
-  
+
   if (
     is.null(dat) ||
     ncol(dat) <= 1
   ) {
-    
     dat <-
-      
       tryCatch(
-        
         read.csv(
           file,
           check.names = FALSE,
           stringsAsFactors = FALSE
         ),
-        
         error =
           function(e) NULL
-        
       )
-    
   }
-  
-  
+
   if (
     is.null(dat) ||
     ncol(dat) <= 1
   ) {
-    
     stop(
       paste0(
         "\nCould not properly read:\n",
@@ -989,10 +861,8 @@ read_deseq <- function(file) {
         "\n\nCheck whether the file is tab- or comma-separated."
       )
     )
-    
   }
-  
-  
+
   cat(
     "Columns:",
     paste(
@@ -1001,51 +871,40 @@ read_deseq <- function(file) {
     ),
     "\n"
   )
-  
-  
+
   # ----------------------------------------------------------
   # Find gene column
   # ----------------------------------------------------------
-  
+
   gene_candidates <-
-    
     grep(
       "gene.*id|geneid|gene_id|^gene$|^id$|symbol",
       colnames(dat),
       ignore.case = TRUE,
       value = TRUE
     )
-  
-  
+
   if (length(gene_candidates) > 0) {
-    
     gene_col <-
       gene_candidates[1]
-    
   } else {
-    
     gene_col <-
       colnames(dat)[1]
-    
   }
-  
-  
+
   # ----------------------------------------------------------
   # Find log2FC
   # ----------------------------------------------------------
-  
+
   lfc_candidates <-
-    
     grep(
       "log2FoldChange|log2FC|logFC",
       colnames(dat),
       ignore.case = TRUE,
       value = TRUE
     )
-  
-  
+
   if (length(lfc_candidates) == 0) {
-    
     stop(
       paste0(
         "\nlog2FoldChange column not found in:\n",
@@ -1057,30 +916,24 @@ read_deseq <- function(file) {
         )
       )
     )
-    
   }
-  
-  
+
   lfc_col <-
     lfc_candidates[1]
-  
-  
+
   # ----------------------------------------------------------
   # Find adjusted P value
   # ----------------------------------------------------------
-  
+
   padj_candidates <-
-    
     grep(
       "^padj$|adjusted.*p|adj.*p|FDR",
       colnames(dat),
       ignore.case = TRUE,
       value = TRUE
     )
-  
-  
+
   if (length(padj_candidates) == 0) {
-    
     stop(
       paste0(
         "\npadj/FDR column not found in:\n",
@@ -1092,140 +945,100 @@ read_deseq <- function(file) {
         )
       )
     )
-    
   }
-  
-  
+
   padj_col <-
     padj_candidates[1]
-  
-  
+
   # ----------------------------------------------------------
   # Extract
   # ----------------------------------------------------------
-  
+
   result <-
-    
     tibble(
-      
       Gene =
         as.character(
           dat[[gene_col]]
         ),
-      
       log2FC =
         suppressWarnings(
           as.numeric(
             dat[[lfc_col]]
           )
         ),
-      
       padj =
         suppressWarnings(
           as.numeric(
             dat[[padj_col]]
           )
         )
-      
     )
-  
-  
+
   # ----------------------------------------------------------
   # Clean gene ID
   # ----------------------------------------------------------
-  
+
   result$Gene <-
-    
     str_extract(
       result$Gene,
       "Solyc[0-9]{2}g[0-9]+(?:\\.[0-9]+)?"
     )
-  
-  
+
   result <-
-    
     result %>%
-    
     filter(
       !is.na(Gene)
     ) %>%
-    
     distinct(
       Gene,
       .keep_all = TRUE
     )
-  
-  
+
   # ----------------------------------------------------------
   # DEG classification
   # ----------------------------------------------------------
-  
+
   result <-
-    
     result %>%
-    
     mutate(
-      
       DEG =
-        
         !is.na(padj) &
-        
         padj <= PADJ_CUTOFF &
-        
         !is.na(log2FC) &
-        
         abs(log2FC) >= LFC_CUTOFF,
-      
-      
       Direction =
-        
         case_when(
-          
           DEG &
             log2FC > 0 ~
             "UP",
-          
           DEG &
             log2FC < 0 ~
             "DOWN",
-          
           TRUE ~
             "NS"
-          
         )
-      
     )
-  
-  
+
   return(result)
-  
 }
 
 
-# ============================================================
-# 12. READ ALL COMPARISONS
-# ============================================================
+# -----------------------------
+# 12. Read all comparisons
+# -----------------------------
 
 deseq_data <- list()
 
-
 for (i in seq_along(deseq_files)) {
-  
-  
   dat <-
-    
     read_deseq(
       deseq_files[i]
     )
-  
-  
+
   comparison_letter <-
-    
     names(deseq_files)[i]
-  
-  
+
   comparison_name <-
-    
     sub(
       "_DESeq2_results$",
       "",
@@ -1235,27 +1048,19 @@ for (i in seq_along(deseq_files)) {
         )
       )
     )
-  
-  
+
   deseq_data[[i]] <-
-    
     list(
-      
       letter =
         comparison_letter,
-      
       name =
         comparison_name,
-      
       file =
         deseq_files[i],
-      
       data =
         dat
-      
     )
-  
-  
+
   cat(
     comparison_letter,
     " | ",
@@ -1276,417 +1081,302 @@ for (i in seq_along(deseq_files)) {
     "\n",
     sep = ""
   )
-  
 }
 
 
-# ============================================================
-# 13. COMPARISON KEY
-# ============================================================
+# -----------------------------
+# 13. Comparison key
+# -----------------------------
 
 comparison_key <-
-  
   tibble(
-    
     Letter =
       sapply(
         deseq_data,
         function(x)
           x$letter
       ),
-    
     Comparison =
       sapply(
         deseq_data,
         function(x)
           x$name
       )
-    
   )
 
-
 write.csv(
-  
   comparison_key,
-  
   file.path(
     output_dir,
     "Comparison_Key.csv"
   ),
-  
   row.names =
     FALSE
-  
 )
 
 
-# ============================================================
-# 14. TOPGO FUNCTION
-# ============================================================
+# -----------------------------
+# 14. topGO function
+# -----------------------------
 
 run_topGO <- function(
-    
   background,
-  
   foreground,
-  
   gene2go,
-  
   ontology,
-  
   comparison
-  
 ) {
-  
-  
   # ----------------------------------------------------------
   # Match genes to GO annotation
   # ----------------------------------------------------------
-  
   background <-
-    
     intersect(
       background,
       names(gene2go)
     )
-  
-  
+
   foreground <-
-    
     intersect(
       foreground,
       background
     )
-  
-  
+
   if (
     length(background) < 10 ||
     length(foreground) < 2
   ) {
-    
     return(NULL)
-    
   }
-  
-  
+
   # ----------------------------------------------------------
   # Gene vector
   # ----------------------------------------------------------
-  
+
   geneList <-
-    
     factor(
-      
       as.integer(
         background %in%
           foreground
       )
-      
     )
-  
-  
+
   names(geneList) <-
     background
-  
-  
+
   # ----------------------------------------------------------
   # topGO object
   # ----------------------------------------------------------
-  
+
   GOdata <-
-    
     new(
-      
       "topGOdata",
-      
       ontology =
         ontology,
-      
       allGenes =
         geneList,
-      
       geneSel =
         function(x)
           x == 1,
-      
       annot =
         annFUN.gene2GO,
-      
       gene2GO =
         gene2go,
-      
       nodeSize =
         5,
-      
       description =
         comparison
-      
     )
-  
-  
+
   # ----------------------------------------------------------
   # Run Fisher test
   # ----------------------------------------------------------
-  
+
   classic_result <-
-    
     runTest(
-      
       GOdata,
-      
       algorithm =
         "classic",
-      
       statistic =
         "fisher"
-      
     )
-  
-  
+
   weight_result <-
-    
     runTest(
-      
       GOdata,
-      
       algorithm =
         "weight01",
-      
       statistic =
         "fisher"
-      
     )
-  
-  
+
   # ----------------------------------------------------------
   # Extract all GO terms
   # ----------------------------------------------------------
-  
+
   res <-
-    
     GenTable(
-      
       GOdata,
-      
       classicFisher =
         classic_result,
-      
       weightFisher =
         weight_result,
-      
       orderBy =
         "weightFisher",
-      
       topNodes =
         length(
           usedGO(GOdata)
         )
-      
     )
-  
-  
+
   if (
     is.null(res) ||
     nrow(res) == 0
   ) {
-    
     return(NULL)
-    
   }
-  
-  
+
   # ----------------------------------------------------------
   # Numeric p values
   # ----------------------------------------------------------
-  
+
   res$classic_p <-
-    
     suppressWarnings(
       as.numeric(
         res$classicFisher
       )
     )
-  
-  
+
   res$weight_p <-
-    
     suppressWarnings(
       as.numeric(
         res$weightFisher
       )
     )
-  
-  
+
   # ----------------------------------------------------------
   # FDR
   # ----------------------------------------------------------
-  
+
   res$FDR <-
-    
     p.adjust(
       res$weight_p,
       method = "BH"
     )
-  
-  
+
   # ----------------------------------------------------------
   # DEG count
   # ----------------------------------------------------------
-  
+
   res$DEG_Count <-
-    
     sapply(
-      
       res$GO.ID,
-      
       function(go) {
-        
         genes <-
-          
           genesInTerm(
             GOdata,
             go
           )[[1]]
-        
-        
+
         sum(
           genes %in%
             foreground
         )
-        
       }
-      
     )
-  
-  
+
   # ----------------------------------------------------------
   # Background count
   # ----------------------------------------------------------
-  
+
   res$Background_Count <-
-    
     sapply(
-      
       res$GO.ID,
-      
       function(go) {
-        
         genes <-
-          
           genesInTerm(
             GOdata,
             go
           )[[1]]
-        
-        
+
         sum(
           genes %in%
             background
         )
-        
       }
-      
     )
-  
-  
+
   # ----------------------------------------------------------
   # DEG percentage
   # ----------------------------------------------------------
-  
+
   res$DEG_Percent <-
-    
     100 *
-    
     res$DEG_Count /
-    
     length(foreground)
-  
-  
+
   # ----------------------------------------------------------
   # -log10 FDR
   # ----------------------------------------------------------
-  
+
   res$negLog10FDR <-
-    
     -log10(
       pmax(
         res$FDR,
         1e-300
       )
     )
-  
-  
+
   # ----------------------------------------------------------
   # Final table
   # ----------------------------------------------------------
-  
+
   result <-
-    
     tibble(
-      
       GO_ID =
         res$GO.ID,
-      
       GO_name =
         res$Term,
-      
       Ontology =
         ontology,
-      
       DEG_Count =
         res$DEG_Count,
-      
       Background_Count =
         res$Background_Count,
-      
       DEG_Percent =
         res$DEG_Percent,
-      
       classic_p =
         res$classic_p,
-      
       weight_p =
         res$weight_p,
-      
       FDR =
         res$FDR,
-      
       negLog10FDR =
         res$negLog10FDR
-      
     )
-  
-  
+
   result
-  
 }
 
 
-# ============================================================
-# 15. RUN GO ENRICHMENT
-# ============================================================
+# -----------------------------
+# 15. Run GO enrichment
+# -----------------------------
 
 all_results <- list()
 
 enrichment_denominators <- list()   # per Comparison x Ontology totals, used for Fold_Enrichment
 
-
 for (i in seq_along(deseq_data)) {
-  
-  
   comp <-
     deseq_data[[i]]
-  
-  
+
   dat <-
     comp$data
-  
-  
+
   cat(
     "\n========================================\n"
   )
-  
-  
+
   cat(
     comp$letter,
     ": ",
@@ -1694,123 +1384,89 @@ for (i in seq_along(deseq_data)) {
     "\n",
     sep = ""
   )
-  
-  
+
   cat(
     "========================================\n"
   )
-  
-  
+
   # ----------------------------------------------------------
   # Background
   # ----------------------------------------------------------
-  
+
   background <-
-    
     intersect(
       dat$Gene,
       names(gene2GO)
     )
-  
-  
+
   # ----------------------------------------------------------
   # UP genes
   # ----------------------------------------------------------
-  
+
   up_genes <-
-    
     dat$Gene[
       dat$Direction == "UP"
     ]
-  
-  
+
   # ----------------------------------------------------------
   # DOWN genes
   # ----------------------------------------------------------
-  
+
   down_genes <-
-    
     dat$Gene[
       dat$Direction == "DOWN"
     ]
-  
-  
+
   # ----------------------------------------------------------
   # Save gene lists
   # ----------------------------------------------------------
-  
+
   writeLines(
-    
     background,
-    
     file.path(
-      
       individual_dir,
-      
       paste0(
         comp$letter,
         "_background.txt"
       )
-      
     )
-    
   )
-  
-  
+
   writeLines(
-    
     up_genes,
-    
     file.path(
-      
       individual_dir,
-      
       paste0(
         comp$letter,
         "_UP.txt"
       )
-      
     )
-    
   )
-  
-  
+
   writeLines(
-    
     down_genes,
-    
     file.path(
-      
       individual_dir,
-      
       paste0(
         comp$letter,
         "_DOWN.txt"
       )
-      
     )
-    
   )
-  
-  
+
   # ----------------------------------------------------------
   # Ontology mapping
   # ----------------------------------------------------------
-  
+
   mappings <- list(
-    
     BP =
       gene2GO_BP,
-    
     CC =
       gene2GO_CC,
-    
     MF =
       gene2GO_MF
-    
   )
-  
-  
+
   # ----------------------------------------------------------
   # Fold-enrichment denominators (per ontology)
   #
@@ -1823,39 +1479,35 @@ for (i in seq_along(deseq_data)) {
   # Total_DEGs = number of UP+DOWN DEGs (combined, distinct genes)
   #   annotated in this ontology.
   # ----------------------------------------------------------
-  
+
   for (ontology in c("BP", "CC", "MF")) {
-    
     ontology_background <-
       intersect(
         background,
         names(mappings[[ontology]])
       )
-    
+
     ontology_deg <-
       intersect(
         union(up_genes, down_genes),
         ontology_background
       )
-    
+
     enrichment_denominators[[
       paste0(comp$letter, "_", ontology)
     ]] <-
-      
       tibble(
         Comparison_Letter = comp$letter,
         Ontology          = ontology,
         Total_Background  = length(ontology_background),
         Total_DEGs        = length(ontology_deg)
       )
-    
   }
-  
-  
+
   # ----------------------------------------------------------
   # UP and DOWN
   # ----------------------------------------------------------
-  
+
   for (
     direction in
     c(
@@ -1863,23 +1515,15 @@ for (i in seq_along(deseq_data)) {
       "DOWN"
     )
   ) {
-    
-    
     genes <-
-      
       if (
         direction == "UP"
       ) {
-        
         up_genes
-        
       } else {
-        
         down_genes
-        
       }
-    
-    
+
     for (
       ontology in
       c(
@@ -1888,34 +1532,22 @@ for (i in seq_along(deseq_data)) {
         "MF"
       )
     ) {
-      
-      
       result <-
-        
         tryCatch(
-          
           run_topGO(
-            
             background =
               background,
-            
             foreground =
               genes,
-            
             gene2go =
               mappings[[ontology]],
-            
             ontology =
               ontology,
-            
             comparison =
               comp$letter
-            
           ),
-          
           error =
             function(e) {
-              
               message(
                 "topGO error in ",
                 comp$letter,
@@ -1926,29 +1558,21 @@ for (i in seq_along(deseq_data)) {
                 ": ",
                 e$message
               )
-              
+
               NULL
-              
             }
-          
         )
-      
-      
+
       if (!is.null(result)) {
-        
-        
         result$Comparison_Letter <-
           comp$letter
-        
-        
+
         result$Comparison_Name <-
           comp$name
-        
-        
+
         result$Direction <-
           direction
-        
-        
+
         all_results[[
           paste0(
             comp$letter,
@@ -1959,130 +1583,94 @@ for (i in seq_along(deseq_data)) {
           )
         ]] <-
           result
-        
-        
+
         # ----------------------------------------------------
         # Save individual result
         # ----------------------------------------------------
-        
+
         write.csv(
-          
           result,
-          
           file.path(
-            
             individual_dir,
-            
             paste0(
-              
               comp$letter,
               "_",
               direction,
               "_",
               ontology,
               "_GO.csv"
-              
             )
-            
           ),
-          
           row.names =
             FALSE
-          
         )
-        
       }
-      
     }
-    
   }
-  
 }
-
 
 enrichment_denominators_df <-
   bind_rows(enrichment_denominators)
 
 
-# ============================================================
-# 16. COMBINE RESULTS
-# ============================================================
+# -----------------------------
+# 16. Combine results
+# -----------------------------
 
 if (
   length(all_results) == 0
 ) {
-  
   stop(
     "\nNo GO enrichment results were generated."
   )
-  
 }
 
-
 go_results <-
-  
   bind_rows(
     all_results
   )
 
 
-# ============================================================
-# 17. SAVE ALL GO RESULTS
-# ============================================================
+# -----------------------------
+# 17. Save all GO results
+# -----------------------------
 
 write.csv(
-  
   go_results,
-  
   file.path(
-    
     output_dir,
-    
     "GO_All_Results.csv"
-    
   ),
-  
   row.names =
     FALSE
-  
 )
 
 
-# ============================================================
-# 18. SIGNIFICANT GO RESULTS
-# ============================================================
+# -----------------------------
+# 18. Significant GO results
+# -----------------------------
 
 significant_go <-
-  
   go_results %>%
-  
   filter(
     !is.na(FDR),
     FDR <= 0.05
   )
 
-
 write.csv(
-  
   significant_go,
-  
   file.path(
-    
     output_dir,
-    
     "GO_Significant_FDR_0.05.csv"
-    
   ),
-  
   row.names =
     FALSE
-  
 )
 
 
-# ============================================================
-# 19. FUNCTIONAL ANNOTATION
-# ============================================================
+# -----------------------------
+# 19. Functional annotation
+# -----------------------------
 #
 # TOP 10 TERMS PER BP / CC / MF
 #
@@ -2101,27 +1689,19 @@ write.csv(
 #
 # Label = UP/DOWN
 #
-# ============================================================
-
+# -----------------------------
 
 annotation_data_list <- list()
 
-
 for (i in seq_along(deseq_data)) {
-  
-  
   comp <-
     deseq_data[[i]]
-  
-  
+
   dat <-
     comp$data
-  
-  
+
   deg <-
-    
     dat %>%
-    
     filter(
       Direction %in%
         c(
@@ -2129,297 +1709,212 @@ for (i in seq_along(deseq_data)) {
           "DOWN"
         )
     )
-  
-  
+
   if (nrow(deg) == 0) {
     next
   }
-  
-  
+
   for (j in seq_len(nrow(deg))) {
-    
-    
     gene <-
       deg$Gene[j]
-    
-    
+
     if (
       !gene %in%
       names(gene2GO)
     ) {
       next
     }
-    
-    
+
     terms <-
       gene2GO[[gene]]
-    
-    
+
     if (length(terms) == 0) {
       next
     }
-    
-    
+
     annotation_data_list[[
       length(annotation_data_list) + 1
     ]] <-
-      
       tibble(
-        
         Comparison =
           comp$letter,
-        
         Direction =
           deg$Direction[j],
-        
         Gene =
           gene,
-        
         GO_ID =
           terms
-        
       )
-    
   }
-  
 }
 
-
 annotation_gene_data <-
-  
   bind_rows(
     annotation_data_list
   )
 
-
 if (
   nrow(annotation_gene_data) == 0
 ) {
-  
   stop(
     "No GO-annotated DEGs were found for functional annotation."
   )
-  
 }
 
 
-# ============================================================
-# 20. ADD GO INFORMATION
-# ============================================================
+# -----------------------------
+# 20. Add GO information
+# -----------------------------
 
 annotation_gene_data <-
-  
   annotation_gene_data %>%
-  
   left_join(
     go_info,
     by = "GO_ID"
   ) %>%
-  
   filter(
     !is.na(Ontology)
   )
 
 
-# ============================================================
-# 21. COUNT UP/DOWN GENES
-# ============================================================
+# -----------------------------
+# 21. Count up/down genes
+# -----------------------------
 
 annotation_counts <-
-  
   annotation_gene_data %>%
-  
   group_by(
-    
     Comparison,
-    
     Direction,
-    
     Ontology,
-    
     GO_ID,
-    
     GO_name
-    
   ) %>%
-  
   summarise(
-    
     Gene_Count =
       n_distinct(Gene),
-    
     .groups =
       "drop"
-    
   )
 
 
-# ============================================================
-# 22. TOP 10 TERMS PER ONTOLOGY
-# ============================================================
+# -----------------------------
+# 22. Top 10 terms per ontology
+# -----------------------------
 
 annotation_ranking <-
-  
   annotation_counts %>%
-  
   group_by(
-    
     Ontology,
-    
     GO_ID,
-    
     GO_name
-    
   ) %>%
-  
   summarise(
-    
     Total_Genes =
       sum(
         Gene_Count,
         na.rm = TRUE
       ),
-    
     .groups =
       "drop"
-    
   ) %>%
-  
   group_by(
     Ontology
   ) %>%
-  
   arrange(
     desc(Total_Genes)
   ) %>%
-  
   slice_head(
     n =
       TOP_ANNOTATION_TERMS
   ) %>%
-  
   ungroup()
 
-
 write.csv(
-  
   annotation_ranking,
-  
   file.path(
-    
     output_dir,
-    
     "Functional_Annotation_Top10.csv"
-    
   ),
-  
   row.names =
     FALSE
-  
 )
 
 
-# ============================================================
-# 23. ADD TOP TERMS TO PLOT DATA
-# ============================================================
+# -----------------------------
+# 23. Add top terms to plot data
+# -----------------------------
 
 annotation_plot_data <-
-  
   annotation_counts %>%
-  
   inner_join(
-    
     annotation_ranking %>%
-      
       select(
         Ontology,
         GO_ID,
         GO_name
       ),
-    
     by = c(
       "Ontology",
       "GO_ID",
       "GO_name"
     )
-    
   )
 
 
-# ============================================================
-# 24. CREATE UP/DOWN WIDE DATA
-# ============================================================
+# -----------------------------
+# 24. Create up/down wide data
+# -----------------------------
 
 annotation_wide <-
-  
   annotation_plot_data %>%
-  
   group_by(
-    
     Comparison,
-    
     Ontology,
-    
     GO_ID,
-    
     GO_name
-    
   ) %>%
-  
   summarise(
-    
     UP = sum(
       Gene_Count[
         Direction == "UP"
       ],
       na.rm = TRUE
     ),
-    
     DOWN = sum(
       Gene_Count[
         Direction == "DOWN"
       ],
       na.rm = TRUE
     ),
-    
     .groups =
       "drop"
-    
   ) %>%
-  
   mutate(
-    
     Total =
       UP + DOWN,
-    
     Label =
       paste0(
         UP,
         "/",
         DOWN
       )
-    
   )
 
 
-# ============================================================
-# 25. ORDER GO TERMS
-# ============================================================
+# -----------------------------
+# 25. Order GO terms
+# -----------------------------
 
 annotation_term_order <-
-  
   annotation_ranking %>%
-  
   group_by(
     Ontology
   ) %>%
-  
   arrange(
     Total_Genes
   ) %>%
-  
   mutate(
-    
     GO_Label =
       make_go_label(
         GO_name,
@@ -2427,119 +1922,80 @@ annotation_term_order <-
         Ontology,
         colored = FALSE
       )
-    
   ) %>%
-  
   ungroup()
 
-
 annotation_wide <-
-  
   annotation_wide %>%
-  
   left_join(
-    
     annotation_term_order %>%
-      
       select(
         Ontology,
         GO_ID,
         GO_Label
       ),
-    
     by = c(
       "Ontology",
       "GO_ID"
     )
-    
   )
 
 
-# ============================================================
-# 26. LONG FORMAT FOR STACKED BARS
-# ============================================================
+# -----------------------------
+# 26. Long format for stacked bars
+# -----------------------------
 
 annotation_long <-
-  
   annotation_wide %>%
-  
   select(
-    
     Comparison,
-    
     Ontology,
-    
     GO_ID,
-    
     GO_name,
-    
     GO_Label,
-    
     UP,
-    
     DOWN
-    
   ) %>%
-  
   pivot_longer(
-    
     cols =
       c(
         DOWN,
         UP
       ),
-    
     names_to =
       "Direction",
-    
     values_to =
       "Gene_Count"
-    
   )
 
-
 annotation_long$Direction <-
-  
   factor(
-    
     annotation_long$Direction,
-    
     levels =
       c(
         "DOWN",
         "UP"
       )
-    
   )
-
 
 annotation_long$Comparison <-
-  
   factor(
-    
     annotation_long$Comparison,
-    
     levels =
       comparison_key$Letter
-    
   )
-
 
 annotation_long$Ontology <-
-  
   factor(
-    
     annotation_long$Ontology,
-    
     levels =
       ONTOLOGY_LEVELS
-    
   )
 
 
-# ============================================================
-# 27. FUNCTIONAL ANNOTATION PLOT
-# ============================================================
+# -----------------------------
+# 27. Functional annotation plot
+# -----------------------------
 #
 # VERTICAL BARS
 #
@@ -2557,123 +2013,78 @@ annotation_long$Ontology <-
 # Y axis:
 #   number of genes
 #
-# ============================================================
+# -----------------------------
 
 functional_annotation_plot <-
-  
   ggplot(
-    
     annotation_long,
-    
     aes(
-      
       x =
         GO_Label,
-      
       y =
         Gene_Count,
-      
       fill =
         Direction
-      
     )
-    
   ) +
-  
   geom_col(
-    
     width =
       0.75
-    
   ) +
-  
   facet_grid(
-    
     Comparison ~ Ontology,
-    
     scales =
       "free_x",
-    
     space =
       "free_x",
-    
     labeller =
       labeller(
         Ontology =
           ONTOLOGY_LABELS
       )
-    
   ) +
-  
   # ----------------------------------------------------------
 # Number labels
 # ----------------------------------------------------------
-
 geom_text(
-  
   data =
-    
     annotation_wide,
-  
   aes(
-    
     x =
       GO_Label,
-    
     y =
       Total,
-    
     label =
       Label
-    
   ),
-  
   inherit.aes =
     FALSE,
-  
   angle =
     90,
-  
   hjust =
     -0.2,
-  
   vjust =
     0.5,
-  
   size =
     FONT_NUMBER,
-  
   fontface =
     "bold"
-  
 ) +
-  
   scale_fill_manual(
-    
     values = c(
-      
       DOWN =
         "steelblue",
-      
       UP =
         "red"
-      
     ),
-    
     labels = c(
-      
       DOWN =
         "Down",
-      
       UP =
         "Up"
-      
     )
-    
   ) +
-  
   scale_y_continuous(
-    
     expand =
       expansion(
         mult =
@@ -2682,40 +2093,27 @@ geom_text(
             0.18
           )
       )
-    
   ) +
-  
   labs(
-    
     x =
       NULL,
-    
     y =
       "Number of genes",
-    
     fill =
       NULL
-    
   ) +
-  
   theme_bw(
-    
     base_size =
       FONT_BASE
-    
   ) +
-  
   theme(
-    
     legend.position =
       "top",
-    
     legend.text =
       element_text(
         size =
           FONT_LEGEND
       ),
-    
     strip.text =
       element_text(
         size =
@@ -2723,144 +2121,101 @@ geom_text(
         face =
           "bold"
       ),
-    
     strip.background =
       element_rect(
         fill =
           "white"
       ),
-    
     panel.grid =
       element_blank(),
-    
     panel.background =
       element_rect(
         fill =
           "grey95"
       ),
-    
     axis.text.x =
       element_text(
-        
         angle =
           90,
-        
         hjust =
           1,
-        
         vjust =
           0.5,
-        
         size =
           FONT_GO,
-        
         face =
           "bold",
-        
         colour =
           "black"
-        
       ),
-    
     axis.text.y =
       element_blank(),
-    
     axis.ticks.y =
       element_blank(),
-    
     axis.title.y =
       element_text(
         size =
           FONT_AXIS_Y,
-        
         face =
           "bold"
       ),
-    
     panel.spacing.x =
       unit(
         0.35,
         "lines"
       ),
-    
     panel.spacing.y =
       unit(
         0.9,
         "lines"
       )
-    
   )
 
 
-# ============================================================
-# 28. SAVE FUNCTIONAL ANNOTATION FIGURE
-# ============================================================
+# -----------------------------
+# 28. Save functional annotation figure
+# -----------------------------
 
 ggsave(
-  
   filename =
-    
     file.path(
-      
       figure_dir,
-      
       "Figure_Functional_Annotation_Top10.tiff"
-      
     ),
-  
   plot =
-    
     functional_annotation_plot,
-  
   width =
     ANNOTATION_WIDTH,
-  
   height =
     ANNOTATION_HEIGHT,
-  
   units =
     "in",
-  
   dpi =
     FIG_DPI,
-  
   compression =
     "lzw"
-  
 )
-
 
 ggsave(
-  
   filename =
-    
     file.path(
-      
       figure_dir,
-      
       "Figure_Functional_Annotation_Top10.pdf"
-      
     ),
-  
   plot =
-    
     functional_annotation_plot,
-  
   width =
     ANNOTATION_WIDTH,
-  
   height =
     ANNOTATION_HEIGHT,
-  
   units =
     "in"
-  
 )
 
 
-# ============================================================
-# 29. FUNCTIONAL ENRICHMENT
-# ============================================================
+# -----------------------------
+# 29. Functional enrichment
+# -----------------------------
 #
 # go_results has one row per Comparison x Direction (UP/DOWN)
 # x Ontology x GO term. For this figure UP and DOWN are
@@ -2872,64 +2227,44 @@ ggsave(
 # per ontology (MF / CC / BP), ranked by total gene count
 # summed across all comparisons.
 #
-# ============================================================
+# -----------------------------
 
 go_results_combined <-
-  
   go_results %>%
-  
   group_by(
-    
     Comparison_Letter,
-    
     Comparison_Name,
-    
     Ontology,
-    
     GO_ID,
-    
     GO_name
-    
   ) %>%
-  
   summarise(
-    
     DEG_Count =
       sum(
         DEG_Count,
         na.rm = TRUE
       ),
-    
     Background_Count =
       max(
         Background_Count,
         na.rm = TRUE
       ),
-    
     FDR =
       min(
         FDR,
         na.rm = TRUE
       ),
-    
     .groups =
       "drop"
-    
   ) %>%
-  
   left_join(
-    
     enrichment_denominators_df,
-    
     by = c(
       "Comparison_Letter",
       "Ontology"
     )
-    
   ) %>%
-  
   mutate(
-    
     negLog10FDR =
       -log10(
         pmax(
@@ -2937,118 +2272,78 @@ go_results_combined <-
           1e-300
         )
       ),
-    
     # Fold enrichment, calculated the same way as the KEGG script:
     # (DEG_Count / Total_DEGs) / (Background_Count / Total_Background)
     Fold_Enrichment =
       (DEG_Count / Total_DEGs) /
       (Background_Count / Total_Background)
-    
   )
 
-
 top30_enrichment <-
-  
   go_results_combined %>%
-  
   group_by(
-    
     GO_ID,
-    
     GO_name,
-    
     Ontology
-    
   ) %>%
-  
   summarise(
-    
     Total_DEG =
       sum(
         DEG_Count,
         na.rm = TRUE
       ),
-    
     Best_FDR =
       min(
         FDR,
         na.rm = TRUE
       ),
-    
     .groups =
       "drop"
-    
   ) %>%
-  
   group_by(
     Ontology
   ) %>%
-  
   arrange(
-    
     desc(Total_DEG),
-    
     Best_FDR,
-    
     .by_group =
       TRUE
-    
   ) %>%
-  
   slice_head(
-    
     n =
       TOP_ENRICHMENT_TERMS_PER_CATEGORY
-    
   ) %>%
-  
   ungroup()
 
-
 write.csv(
-  
   top30_enrichment,
-  
   file.path(
-    
     output_dir,
-    
     "Functional_Enrichment_Top30.csv"
-    
   ),
-  
   row.names =
     FALSE
-  
 )
 
 
-# ============================================================
-# 30. PREPARE ENRICHMENT PLOT DATA
-# ============================================================
+# -----------------------------
+# 30. Prepare enrichment plot data
+# -----------------------------
 
 enrichment_plot_data <-
-  
   go_results_combined %>%
-  
   inner_join(
-    
     top30_enrichment %>%
-      
       select(
         GO_ID,
         Ontology
       ),
-    
     by = c(
       "GO_ID",
       "Ontology"
     )
-    
   ) %>%
-  
   mutate(
-    
     GO_Label =
       make_go_label(
         GO_name,
@@ -3056,44 +2351,33 @@ enrichment_plot_data <-
         Ontology,
         colored = TRUE
       )
-    
   )
 
 
-# ============================================================
-# 31. ORDER ENRICHMENT TERMS
-# ============================================================
+# -----------------------------
+# 31. Order enrichment terms
+# -----------------------------
 #
 # Terms are grouped by category (MF, then CC, then BP, so
 # MF ends up at the top of the horizontal bar chart), and
 # ranked by total gene count within each category.
-# ============================================================
+# -----------------------------
 
 enrichment_order <-
-  
   top30_enrichment %>%
-  
   mutate(
-    
     Ontology =
       factor(
         Ontology,
         levels =
           rev(ONTOLOGY_LEVELS)
       )
-    
   ) %>%
-  
   arrange(
-    
     Ontology,
-    
     Total_DEG
-    
   ) %>%
-  
   mutate(
-    
     GO_Label =
       make_go_label(
         GO_name,
@@ -3101,43 +2385,31 @@ enrichment_order <-
         Ontology,
         colored = TRUE
       )
-    
   ) %>%
-  
   pull(
     GO_Label
   )
 
-
 enrichment_plot_data$GO_Label <-
-  
   factor(
-    
     enrichment_plot_data$GO_Label,
-    
     levels =
       unique(
         enrichment_order
       )
-    
   )
-
 
 enrichment_plot_data$Comparison <-
-  
   factor(
-    
     enrichment_plot_data$Comparison_Letter,
-    
     levels =
       comparison_key$Letter
-    
   )
 
 
-# ============================================================
-# 32. FUNCTIONAL ENRICHMENT PLOT
-# ============================================================
+# -----------------------------
+# 32. Functional enrichment plot
+# -----------------------------
 #
 # HORIZONTAL BARS
 #
@@ -3157,79 +2429,50 @@ enrichment_plot_data$Comparison <-
 #   gene count, printed at the end of each bar
 #
 # Styling below (fonts, spacing, figure size, color scale) is
-# matched directly to Figure 2 in 6_2_KEGG_Analysis.R.
-# ============================================================
+# matched directly to Figure 2 in 6.2_KEGG_Analysis.R.
+# -----------------------------
 
 functional_enrichment_plot <-
-  
   ggplot(
-    
     enrichment_plot_data,
-    
     aes(
-      
       x =
         DEG_Count,
-      
       y =
         GO_Label,
-      
       fill =
         Fold_Enrichment
-      
     )
-    
   ) +
-  
   geom_col(
-    
     width =
       0.8
-    
   ) +
-  
   # ----------------------------------------------------------
 # Gene count at the end of the bar
 # ----------------------------------------------------------
-
 geom_text(
-  
   aes(
-    
     label =
       DEG_Count
-    
   ),
-  
   hjust =
     -0.2,
-  
   size =
     FONT_NUMBER_ENRICH,
-  
   color =
     "black"
-  
 ) +
-  
   facet_grid(
-    
     . ~ Comparison,
-    
     scales =
       "free_x"
-    
   ) +
-  
   scale_fill_viridis_c(
-    
     option =
       "plasma"
-    
   ) +
-  
   scale_x_continuous(
-    
     expand =
       expansion(
         mult =
@@ -3238,318 +2481,219 @@ geom_text(
             0.3
           )
       )
-    
   ) +
-  
   scale_y_discrete(
-    
     expand =
       expansion(
         add =
           0.4
       )
-    
   ) +
-  
   labs(
-    
     x =
       "Number of genes",
-    
     y =
       NULL,
-    
     fill =
       "Fold\nEnrichment"
-    
   ) +
-  
   theme_bw(
-    
     base_size =
       FONT_BASE_ENRICH
-    
   ) +
-  
   theme(
-    
     strip.text =
       element_text(
-        
         size =
           FONT_STRIP_ENRICH,
-        
         face =
           "bold"
-        
       ),
-    
     strip.background =
       element_rect(
         fill =
           "white"
       ),
-    
     panel.grid =
       element_blank(),
-    
     panel.background =
       element_rect(
         fill =
           "grey95"
       ),
-    
     axis.text.x =
       element_text(
         size =
           FONT_AXIS_ENRICH - 1
       ),
-    
     axis.ticks.x =
       element_line(),
-    
     axis.text.y =
       ggtext::element_markdown(
         size =
           FONT_GO_ENRICH,
-        
         face =
           "bold"
       ),
-    
     axis.title.x =
       element_text(
         size =
           FONT_STRIP_ENRICH,
-        
         face =
           "bold"
       ),
-    
     legend.text =
       element_text(
         size =
           FONT_LEGEND_ENRICH
       ),
-    
     legend.title =
       element_text(
         size =
           FONT_LEGEND_ENRICH,
-        
         face =
           "bold"
       ),
-    
     panel.spacing.x =
       unit(
         1.2,
         "lines"
       )
-    
   )
 
 
-# ============================================================
-# 33. SAVE FUNCTIONAL ENRICHMENT FIGURE
-# ============================================================
+# -----------------------------
+# 33. Save functional enrichment figure
+# -----------------------------
 
 ggsave(
-  
   filename =
-    
     file.path(
-      
       figure_dir,
-      
       "Figure_Functional_Enrichment_Top30.tiff"
-      
     ),
-  
   plot =
-    
     functional_enrichment_plot,
-  
   width =
     ENRICHMENT_WIDTH,
-  
   height =
     ENRICHMENT_HEIGHT,
-  
   units =
     "in",
-  
   dpi =
     FIG_DPI,
-  
   compression =
     "lzw"
-  
 )
-
 
 ggsave(
-  
   filename =
-    
     file.path(
-      
       figure_dir,
-      
       "Figure_Functional_Enrichment_Top30.pdf"
-      
     ),
-  
   plot =
-    
     functional_enrichment_plot,
-  
   width =
     ENRICHMENT_WIDTH,
-  
   height =
     ENRICHMENT_HEIGHT,
-  
   units =
     "in"
-  
 )
 
 
-# ============================================================
-# 34. SAVE FIGURE DATA
-# ============================================================
+# -----------------------------
+# 34. Save figure data
+# -----------------------------
 
 write.csv(
-  
   annotation_wide,
-  
   file.path(
-    
     output_dir,
-    
     "Functional_Annotation_Figure_Data.csv"
-    
   ),
-  
   row.names =
     FALSE
-  
 )
-
 
 write.csv(
-  
   enrichment_plot_data,
-  
   file.path(
-    
     output_dir,
-    
     "Functional_Enrichment_Figure_Data.csv"
-    
   ),
-  
   row.names =
     FALSE
-  
 )
 
 
-# ============================================================
-# 35. DEG SUMMARY
-# ============================================================
+# -----------------------------
+# 35. DEG summary
+# -----------------------------
 
 deg_summary <-
-  
   map_dfr(
-    
     deseq_data,
-    
     function(x) {
-      
       dat <-
         x$data
-      
-      
+
       tibble(
-        
         Comparison =
           x$name,
-        
         Letter =
           x$letter,
-        
         Total_Genes =
           nrow(dat),
-        
         DEGs =
           sum(
             dat$DEG,
             na.rm = TRUE
           ),
-        
         UP =
           sum(
             dat$Direction ==
               "UP"
           ),
-        
         DOWN =
           sum(
             dat$Direction ==
               "DOWN"
           )
-        
       )
-      
     }
-    
   )
 
-
 write.csv(
-  
   deg_summary,
-  
   file.path(
-    
     output_dir,
-    
     "DEG_Summary_All_Comparisons.csv"
-    
   ),
-  
   row.names =
     FALSE
-  
 )
 
 
-# ============================================================
-# 36. SAVE SESSION INFORMATION
-# ============================================================
+# -----------------------------
+# 36. Save session information
+# -----------------------------
 
 writeLines(
-  
   capture.output(
     sessionInfo()
   ),
-  
   file.path(
-    
     output_dir,
-    
     "sessionInfo.txt"
-    
   )
-  
 )
 
 
-# ============================================================
-# 37. FINAL MESSAGE
-# ============================================================
+# -----------------------------
+# 37. Final message
+# -----------------------------
 
 cat(
   "\n\n====================================================\n"

@@ -1,7 +1,8 @@
-# ============================================================================
-# KEGG PATHWAY ANALYSIS FOR TOMATO RNA-SEQ (8 COMPARISONS a-h)
-#
-# WHAT THIS SCRIPT DOES, STEP BY STEP
+# ==========================================================
+# 6.2_KEGG_Analysis.R by Md Jahid Hasan Jone
+# KEGG pathway analysis of the DESeq2 comparisons from step 5 (8 comparisons a-h)
+# ==========================================================
+# What this script does:
 #   1. Reads the KAAS query.ko.txt file (Gene ID -> K number).
 #   2. Downloads the official KEGG pathway hierarchy once, so every pathway
 #      can be labelled with a category (Metabolism, Genetic Information
@@ -24,17 +25,16 @@
 #      the annotation figure, category-coloured labels on the enrichment
 #      figure, "Up/Down" or DEG-count numbers printed on every bar).
 #
-# OUTPUT
-#   7_KEGG/
-#     01_KO_annotation/        Gene ID <-> K number table
-#     02_Annotated_DESeq2/     DESeq2 results + K number + category
-#     03_DEG_tables/           Significant / up / down DEG tables per comparison
-#     04_KEGG_enrichment/      enrichKEGG() statistical result tables (for the record)
-#     Figure1_Functional_Annotation.tiff
-#     Figure2_Functional_Enrichment.tiff
-#     Comparison_Key.csv       what letter a-h stands for
+# Output (written to output_dir, section 2):
+#   01_KO_annotation/        Gene ID <-> K number table
+#   02_Annotated_DESeq2/     DESeq2 results + K number + category
+#   03_DEG_tables/           Significant / up / down DEG tables per comparison
+#   04_KEGG_enrichment/      enrichKEGG() statistical result tables (for the record)
+#   Figure1_Functional_Annotation.tiff
+#   Figure2_Functional_Enrichment.tiff
+#   Comparison_Key.csv       what each comparison letter (a, b, c ...) stands for
 #
-# NOTE ON GENE ID MATCHING
+# Note on gene ID matching:
 #   ITAG4.0 transcript IDs look like "Solyc10g079470.3.1" (gene.version.mRNA).
 #   DESeq2 was run on gene-level counts, so its IDs usually drop the last
 #   ".1" (mRNA number) but keep the gene version, e.g. "Solyc10g079470.3".
@@ -43,18 +43,34 @@
 #   gene IDs best (see section 6). Check the printed match rate the first
 #   time you run this.
 #
-# WHY FIGURE 1 LABELS ARE PLAIN BLACK BUT FIGURE 2 LABELS ARE COLOURED
-#   This mirrors the Gene Ontology script exactly. Rotated, category-coloured
+# Why Figure 1 labels are plain black but Figure 2 labels are coloured:
+#   This mirrors the Gene Ontology script (6.1) exactly. Rotated, category-coloured
 #   markdown text (as would be needed on Figure 1's x-axis) is not reliably
 #   rendered by ggtext, so Figure 1 uses plain black rotated text instead
 #   (category is still visible from the column it sits in). Figure 2's
 #   labels are horizontal, where coloured markdown renders reliably.
-# ============================================================================
+#
+# ----------------------------------------------------------
+# HOW TO EDIT THE SCRIPT
+# ----------------------------------------------------------
+#   Paths (section 2): replace /.../.../ with the path to your project folder. Each input
+#     file can also be picked in a window with file.choose() (see the Option 2 lines).
+#   Comparisons (section 2): list the comparison names in "comparison_names". Each name must
+#     match "name" in the comparisons list of 5_DESeq2_Analysis.R exactly, because the script
+#     reads <name>_DESeq2_results.csv. Letters a, b, c ... follow the order of the list.
+#       Add a comparison:    add a line with its name
+#       Remove a comparison: delete its line or put # in front of it
+#       Every line needs a comma at the end except the last one in the list.
+#   After changing the number of comparisons, also check the figure sizes in section 2:
+#       FIG1_HEIGHT (Figure 1 has one row per comparison)
+#       FIG2_WIDTH  (Figure 2 has one column per comparison)
+#   DEG thresholds, number of pathways shown, colours, fonts and figure sizes are set in section 2.
+# ==========================================================
 
 
-############################################################
-# 1. LOAD PACKAGES
-############################################################
+# -----------------------------
+# 1. Load packages
+# -----------------------------
 
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
@@ -88,32 +104,61 @@ select <- dplyr::select
 filter <- dplyr::filter
 
 
-############################################################
-# 2. USER SETTINGS
-############################################################
+# -----------------------------
+# 2. User settings
+# -----------------------------
 
-# ---- input files -----------------------------------------------------------
-ko_file   <- "R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/Reference/query.ko.txt"
-deseq_dir <- "R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/New_Name/Results/5_DESeq2/Tables/Comparisons"
+# ---- input files  <- EDIT -----------------------------------------------------
+# There are two ways to give each input file. Use ONE of them per file and comment out the other:
+#   Option 1 (default): direct path. Replace /.../.../ with the path to your project folder.
+#   Option 2: file.choose() opens a window to pick the file (needs an interactive R session such
+#             as RStudio). To use it, remove the # from the "message" and "file.choose()" lines
+#             and put a # in front of the direct-path line.
 
-# ---- output location --------------------------------------------------------
-output_dir <- "R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/New_Name/Results/7_KEGG"
+# KAAS query.ko.txt file (Gene ID -> K number)
+# Option 1: direct path
+ko_file   <- "/.../.../Bulk_RNA_seq/2_References/query.ko.txt"
 
-# ---- the 8 comparisons, labelled a-h ----------------------------------------
-comparison_files <- c(
-  a = "CLN1466EA vs NC123S_DESeq2_results.csv",
-  b = "Flower vs Leaf_DESeq2_results.csv",
-  c = "CLN1466EA_Flower vs NC123S_Flower_DESeq2_results.csv",
-  d = "CLN1466EA_Flower_24h vs NC123S_Flower_24h_DESeq2_results.csv",
-  e = "CLN1466EA_Flower_72h vs NC123S_Flower_72h_DESeq2_results.csv",
-  f = "CLN1466EA_Leaf vs NC123S_Leaf_DESeq2_results.csv",
-  g = "CLN1466EA_Leaf_24h vs NC123S_Leaf_24h_DESeq2_results.csv",
-  h = "CLN1466EA_Leaf_72h vs NC123S_Leaf_72h_DESeq2_results.csv"
+# Option 2: choose the file in a window
+#message("Choose the KAAS query.ko.txt file")
+#ko_file <- file.choose()
+
+# Folder with the DESeq2 result csv files from step 5 (Tables/Comparisons)
+# Option 1: direct path
+deseq_dir <- "/.../.../Bulk_RNA_seq/5_Results/5_DESeq2/Tables/Comparisons"
+
+# Option 2: choose ANY ONE of the DESeq2 result csv files; the script uses the folder it is in
+#message("Choose any ONE DESeq2 result csv file (the script uses its folder)")
+#deseq_dir <- dirname(file.choose())
+
+# ---- output location  <- EDIT -------------------------------------------------
+output_dir <- "/.../.../Bulk_RNA_seq/5_Results/6.2_KEGG"
+
+# ---- comparisons  <- EDIT -----------------------------------------------------
+# One name per comparison, written exactly as "name" in the comparisons list of
+# 5_DESeq2_Analysis.R. The script reads <name>_DESeq2_results.csv from deseq_dir.
+# Letters a, b, c ... are given in the order listed here; they are the panel letters
+# on the figures and in Comparison_Key.csv.
+# Add a comparison: add a line. Remove one: delete the line or put # in front of it.
+# Every line needs a comma at the end except the last one.
+# After changing the number of comparisons, check FIG1_HEIGHT and FIG2_WIDTH below.
+comparison_names <- c(
+  "CLN1466EA vs NC123S",
+  "Flower vs Leaf",
+  "CLN1466EA_Flower vs NC123S_Flower",
+  "CLN1466EA_Flower_24h vs NC123S_Flower_24h",
+  "CLN1466EA_Flower_72h vs NC123S_Flower_72h",
+  "CLN1466EA_Leaf vs NC123S_Leaf",
+  "CLN1466EA_Leaf_24h vs NC123S_Leaf_24h",
+  "CLN1466EA_Leaf_72h vs NC123S_Leaf_72h"
 )
 
+comparison_files <- paste0(comparison_names, "_DESeq2_results.csv")
+names(comparison_files) <- letters[seq_along(comparison_names)]
+
 # ---- DEG thresholds ----------------------------------------------------------
-PADJ_CUTOFF <- 0.05
-LFC_CUTOFF  <- 1   # |log2FoldChange| > 1  ==  2-fold change
+PADJ_CUTOFF <- 0.05   # <- EDIT: adjusted p-value cutoff for a significant DEG
+LFC_CUTOFF  <- 1      # <- EDIT: |log2FoldChange| > 1  ==  2-fold change. Step 5 uses lfc_cutoff = 2 for its Up/Down calls; set the same value here if you want the same DEGs
 
 # ---- KEGG enrichment settings (used for the statistical record tables only) --
 MIN_GS_SIZE <- 3
@@ -148,21 +193,21 @@ CATEGORY_COLORS <- c(
 FONT_BASE    <- 9    # overall base size
 FONT_AXIS    <- 9    # axis text (numeric ticks, gene counts)
 FONT_PATHWAY <- 10   # pathway name labels (bold, larger than the default axis text)
-FONT_STRIP   <- 12   # comparison a-h strip labels
+FONT_STRIP   <- 12   # comparison letter strip labels (a, b, c ...)
 FONT_LEGEND  <- 9    # legend text
 FONT_NUMBER  <- 2.6  # geom_text data-label size (ggplot geom_text uses mm, roughly x2.8 = pt)
 
 # ---- figure sizes (inches) -----------------------------------------------------
 FIG1_WIDTH  <- 12
-FIG1_HEIGHT <- 18
-FIG2_WIDTH  <- 18
+FIG1_HEIGHT <- 18   # <- EDIT: Figure 1 has one row per comparison (8 comparisons)
+FIG2_WIDTH  <- 18   # <- EDIT: Figure 2 has one column per comparison (8 comparisons)
 FIG2_HEIGHT <- 12
 FIG_DPI     <- 1000
 
 
-############################################################
-# 3. CREATE OUTPUT FOLDERS
-############################################################
+# -----------------------------
+# 3. Create output folders
+# -----------------------------
 
 subfolders <- c("01_KO_annotation", "02_Annotated_DESeq2", "03_DEG_tables", "04_KEGG_enrichment")
 for (sub in subfolders) {
@@ -170,9 +215,9 @@ for (sub in subfolders) {
 }
 
 
-############################################################
-# 4. HELPER FUNCTIONS
-############################################################
+# -----------------------------
+# 4. Helper functions
+# -----------------------------
 
 # ---- read the KAAS query.ko.txt file ----
 # Some genes have no K number, so lines can have 1 or 2 columns.
@@ -349,9 +394,9 @@ count_genes_per_pathway <- function(gene_ids, ko_annotation, ko_pathway_map, cat
 }
 
 
-############################################################
-# 5. READ KO ANNOTATION AND BUILD KEGG REFERENCE TABLES
-############################################################
+# -----------------------------
+# 5. Read KO annotation and build KEGG reference tables
+# -----------------------------
 
 cat("==================================================\n")
 cat("STEP 1: KO annotation and KEGG reference tables\n")
@@ -382,9 +427,9 @@ category_map <- category_map %>%
   mutate(Category = factor(Category, levels = KEEP_CATEGORIES))
 
 
-############################################################
-# 6. CHOOSE THE GENE ID MATCHING STRATEGY
-############################################################
+# -----------------------------
+# 6. Choose the gene ID matching strategy
+# -----------------------------
 
 first_deseq <- read_deseq_file(file.path(deseq_dir, comparison_files[["a"]]))
 id_trim_n <- choose_id_match_strategy(ko_annotation$Gene_ID, first_deseq$Gene_ID)
@@ -394,9 +439,9 @@ ko_annotation <- ko_annotation %>%
   distinct(Gene_ID_matched, K_Number)
 
 
-############################################################
-# 7. PROCESS EACH COMPARISON: ANNOTATE + FLAG DEGs
-############################################################
+# -----------------------------
+# 7. Process each comparison: annotate + flag DEGs
+# -----------------------------
 
 cat("\n==================================================\n")
 cat("STEP 2: annotating DESeq2 results and flagging DEGs\n")
@@ -438,9 +483,10 @@ for (label in names(comparison_files)) {
 }
 
 
-############################################################
-# 8. DEG COUNTS PER PATHWAY (UP vs DOWN), ALL COMPARISONS
-############################################################
+# -----------------------------
+# 8. DEG counts per pathway (up vs down), all comparisons
+# -----------------------------
+
 # This is the shared building block for both figures: how many up- and
 # down-regulated genes from each comparison map to each pathway.
 
@@ -456,9 +502,9 @@ annotation_counts <- map_dfr(names(deg_results), function(label) {
 })
 
 
-############################################################
-# 9. RANK ALL PATHWAYS BY TOTAL DEGs ANNOTATED (ALL COMPARISONS)
-############################################################
+# -----------------------------
+# 9. Rank all pathways by total DEGs annotated (all comparisons)
+# -----------------------------
 
 pathway_ranking <- annotation_counts %>%
   group_by(Pathway_Number, Pathway_Name, Category) %>%
@@ -487,9 +533,10 @@ write.csv(top_annotation, file.path(output_dir, "Top_Pathways_Figure1.csv"), row
 write.csv(top_enrichment, file.path(output_dir, "Top_Pathways_Figure2.csv"), row.names = FALSE)
 
 
-############################################################
-# 10. FOLD ENRICHMENT (used directly for Figure 2)
-############################################################
+# -----------------------------
+# 10. Fold enrichment (used directly for figure 2)
+# -----------------------------
+
 # Fold enrichment = (DEG_Count / total DEGs) / (Background_Count / total
 # background genes), calculated directly so every one of the top pathways
 # gets a value for every comparison -- it does not depend on a pathway
@@ -545,9 +592,10 @@ write.csv(
 )
 
 
-############################################################
-# 11. STATISTICAL KEGG ENRICHMENT (enrichKEGG, saved for the record)
-############################################################
+# -----------------------------
+# 11. Statistical KEGG enrichment (enrichkegg, saved for the record)
+# -----------------------------
+
 # Kept as a separate statistical record (p-values, FDR) alongside the
 # direct fold-enrichment calculation used for the figure above.
 
@@ -597,9 +645,9 @@ for (label in names(deg_results)) {
 }
 
 
-############################################################
-# 12. SHARED PLOT STYLING (matches the GO script)
-############################################################
+# -----------------------------
+# 12. Shared plot styling (matches the GO script)
+# -----------------------------
 
 comparison_levels <- names(comparison_files)
 
@@ -616,9 +664,9 @@ base_theme <- theme_bw(base_size = FONT_BASE) +
   )
 
 
-############################################################
-# 13. FIGURE 1 - FUNCTIONAL ANNOTATION (up/down gene counts)
-############################################################
+# -----------------------------
+# 13. Figure 1 - functional annotation (up/down gene counts)
+# -----------------------------
 
 cat("\nBuilding Figure 1: Functional Annotation...\n")
 
@@ -664,9 +712,9 @@ ggsave(
 )
 
 
-############################################################
-# 14. FIGURE 2 - FUNCTIONAL ENRICHMENT (fold enrichment)
-############################################################
+# -----------------------------
+# 14. Figure 2 - functional enrichment (fold enrichment)
+# -----------------------------
 
 cat("Building Figure 2: Functional Enrichment...\n")
 
@@ -701,9 +749,9 @@ ggsave(
 )
 
 
-############################################################
-# 15. SAVE COMPARISON KEY AND FINISH
-############################################################
+# -----------------------------
+# 15. Save comparison key and finish
+# -----------------------------
 
 write.csv(
   tibble(Letter = names(comparison_files), Comparison = unname(comparison_files)),
