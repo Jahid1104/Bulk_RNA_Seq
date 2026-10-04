@@ -18,12 +18,10 @@ Author: Md Jahid Hasan Jone
 | 5 | `5_DESeq2_Analysis.R` | Differential expression with DESeq2 for a list of comparisons, with volcano, MA, heat map, bar and Venn figures |
 | 6.1 | `6.1_GeneOntology.R` | GO enrichment (topGO) of the up- and down-regulated genes of each comparison, with a functional annotation figure and a functional enrichment figure |
 | 6.2 | `6.2_KEGG_Analysis.R` | KEGG pathway annotation and enrichment of the same DEGs, with the same two figures |
-| 7 | `7_TF_Heatmap.R` | Transcription factor heatmap |
-| 8 | `8_WGCNA.R` | WGCNA co-expression analysis |
+| 7 | `7_TF_Heatmap.R` | Heat map of the log2 fold change of a list of selected genes (for example transcription factors) across selected comparisons, with significance stars |
+| 8 | `8_WGCNA.R` | WGCNA co-expression network analysis: modules, module-trait heat maps, hub genes and a hub gene annotation table |
 
 Helper scripts: `fastp_summary_from_json_files.ipynb`, `Fastp_HTML_to_PowerPoint.ipynb`, `collect_salmon_mapping_rate.py`, `submit_R.sh`.
-
-Steps 7 and 8 and the helper scripts are being added to this repository one at a time as they are finalized. Steps 1 to 6.2 are documented in full below.
 
 ## Requirements
 
@@ -34,19 +32,21 @@ Steps 7 and 8 and the helper scripts are being added to this repository one at a
 - For step 5, also: `DESeq2` (Bioconductor), `ggplot2`, `ggrepel`, `pheatmap`, `RColorBrewer`, `ggVennDiagram`, `extrafont` and `patchwork`. The script installs any that are missing.
 - For step 6.1, also: `topGO` (Bioconductor), `ggplot2`, `dplyr`, `tidyr`, `stringr`, `readr`, `purrr`, `tibble` and `ggtext`. The script installs any that are missing.
 - For step 6.2, also: `clusterProfiler` and `KEGGREST` (Bioconductor), `jsonlite`, `ragg` and the packages used in step 6.1 except `topGO`. The script installs any that are missing, and needs an internet connection the first time it runs (it downloads the KEGG pathway tables).
+- For step 7, also: `pheatmap`, `RColorBrewer` and `extrafont`. The script installs any that are missing.
+- For step 8, also: `WGCNA`, `DESeq2`, `impute` and `preprocessCore` (Bioconductor), `ggplot2`, `pheatmap`, `RColorBrewer`, `igraph` and `magick`. The script installs any that are missing.
 
 ## Folder structure
 
-Create one project folder named `Bulk_RNA_Seq`. Everything (scripts, references, reads, results, sample information) lives inside it.
+Create one project folder named `Bulk_RNA_seq` (the placeholder paths in the scripts use this spelling, and Linux is case-sensitive). Everything (scripts, references, reads, results, sample information) lives inside it.
 
 ```
-Bulk_RNA_Seq/
+Bulk_RNA_seq/
 ├── 1_Codes/
-│   ├── 1_Bulk_RNA_Seq_fastp.sh
+│   ├── 1_Bulk_RNASeq_fastp.sh
 │   ├── 2_Salmon.sh
 │   ├── 3.1_make_tx2gene.R
 │   ├── 3.2_tximport_combined.R
-│   ├── 4_sample_relationship_analysis.py
+│   ├── 4_Sample_Relationship_Analysis.py
 │   ├── 5_DESeq2_Analysis.R
 │   ├── 6.1_GeneOntology.R
 │   ├── 6.2_KEGG_Analysis.R
@@ -73,15 +73,16 @@ Bulk_RNA_Seq/
 │   ├── 6.1_GO/
 │   ├── 6.2_KEGG/
 │   ├── 7_TF/
+│   │   └── TF_Genes.csv
 │   └── 8_WGCNA/
 └── Metadata.csv
 ```
 
-To create all the folders at once, run this from the directory where you want the project (add `Metadata.csv` yourself):
+To create all the folders at once, run this from the directory where you want the project (add `Metadata.csv` and `5_Results/7_TF/TF_Genes.csv` yourself):
 
 ```bash
-mkdir -p Bulk_RNA_Seq/{1_Codes,2_References,3_Raw_Reads,4_Trimmed_Reads} \
-         Bulk_RNA_Seq/5_Results/{1_fastp,2_Salmon,3_tximport,4_Sample_Relationship_Analysis,5_DESeq2,6.1_GO,6.2_KEGG,7_TF,8_WGCNA}
+mkdir -p Bulk_RNA_seq/{1_Codes,2_References,3_Raw_Reads,4_Trimmed_Reads} \
+         Bulk_RNA_seq/5_Results/{1_fastp,2_Salmon,3_tximport,4_Sample_Relationship_Analysis,5_DESeq2,6.1_GO,6.2_KEGG,7_TF,8_WGCNA}
 ```
 
 ## Before you run anything
@@ -93,6 +94,8 @@ The scripts contain placeholder paths written as `/.../.../`. Replace them with 
 - the GFF, tx2gene and `quant.sf` paths in the R scripts
 - `counts_file`, `meta_file` and `output_dir` in `5_DESeq2_Analysis.R` (or use `file.choose()` for the two input files, see Step 5)
 - `go_file`, `obo_file`, `deseq_dir` and `output_dir` in `6.1_GeneOntology.R`, and `ko_file`, `deseq_dir` and `output_dir` in `6.2_KEGG_Analysis.R` (or use `file.choose()` for the input files, see Step 6)
+- `deseq2_dir`, `gene_file` and `output_dir` in `7_TF_Heatmap.R` (or use `file.choose()` for the gene list, see Step 7)
+- `count_file`, `metadata_file`, `gff_file` and `output_dir` in `8_WGCNA.R` (or use `file.choose()` for the input files, see Step 8)
 
 The GFF (`gene_annotation.gff`) and the transcriptome fasta must come from the same ITAG4.0 release. If they don't, transcript IDs in Salmon output won't match the tx2gene table.
 
@@ -125,7 +128,7 @@ Including genotype, treatment and replicate in the prefix helps (for example `To
 
 ```bash
 cd 1_Codes
-bsub < 1_Bulk_RNA_Seq_fastp.sh
+bsub < 1_Bulk_RNASeq_fastp.sh
 bjobs            # check job status
 ```
 
@@ -166,7 +169,7 @@ Each sample folder in `5_Results/2_Salmon/` must have a unique name, because the
 ## Step 4: Sample relationships
 
 ```bash
-python 4_sample_relationship_analysis.py
+python 4_Sample_Relationship_Analysis.py
 ```
 
 Reads `5_Results/3_tximport/gene_counts.csv`, removes genes with zero counts in every sample, and applies log2(count + 1). Writes one combined figure, `Figure1_Combined.png` (1000 dpi) and `Figure1_Combined.pdf`, to `5_Results/4_Sample_Relationship_Analysis/`:
@@ -318,11 +321,71 @@ Written to `5_Results/6.2_KEGG/`:
 
 The number of pathways shown (`TOP_N_ANNOTATION`, `TOP_N_ENRICHMENT`), colors, fonts and figure sizes are set in section 2.
 
+## Step 7: Heat map of selected genes (`7_TF_Heatmap.R`)
+
+Run it in R (RStudio or `Rscript`). It takes a list of genes, such as transcription factors, and draws their log2 fold change across the comparisons you select.
+
+**Input files.**
+
+- A gene list csv with the columns `Gene Name` and `Gene ID` (default `5_Results/7_TF/TF_Genes.csv`). The row order of this file is the row order of the heat map.
+- The DESeq2 result tables from Step 5 in `5_Results/5_DESeq2/Tables/Comparisons/`.
+
+Each input can be given by a direct path (default) or picked in a window with `file.choose()` (gene list only), as in Step 5.
+
+**Editing the comparisons.** The columns come from the `selected_comparisons` vector in section 3. Each name must match `name` in the `comparisons` list of `5_DESeq2_Analysis.R` exactly. Letters a, b, c and so on are given in the order listed. To add or remove a comparison, add or delete a line (every line needs a comma at the end except the last one). The current order is the same as `final_comparisons` in Step 5, so the panel letters agree with the combined volcano figure of Step 5. They do not agree with the letters of Step 6, which follow the order of `comparison_names` in those scripts.
+
+**How genes are matched.** A gene is looked up by its `Gene ID` in the `Gene` column of each DESeq2 table. If there is no exact match, the script tries again with the version suffix removed from both sides (`Solyc01g060400.1` and `Solyc01g060400`). The script prints how many genes were found in each comparison. Genes that are not found show as grey cells.
+
+**Heat map.** Colors show log2 fold change on a symmetric blue-white-red scale, so white is no change. Stars show the adjusted p-value (`*` below 0.05, `**` below 0.01, `***` below 0.001). Rows and columns are not clustered. The figure is 6.27 x 8 inches, which fits about 25 genes and 8 comparisons; change the width and height in section 7 for other sizes.
+
+**Fonts.** The figure uses Times New Roman through `extrafont`. `loadfonts(device = "win")` is for Windows; on Mac or Linux use `device = "pdf"`. If the font is not found, set `FONT <- "serif"`.
+
+Written to `5_Results/7_TF/`:
+
+- `TF_Heatmap.tiff` (1000 dpi)
+- `TF_Heatmap_Column_Legend.csv`: which letter is which comparison
+
+## Step 8: WGCNA (`8_WGCNA.R`)
+
+Run it in R (RStudio or `Rscript`), or submit it as a job from `1_Codes` with `bsub < submit_R.sh`. The job script allows 20 minutes (`#BSUB -W 20`), which may be too short for 5000 genes and 1000 dpi figures, so raise it if the job stops. `file.choose()` only works in an interactive R session, so use direct paths for a job.
+
+**Input files.**
+
+- `gene_counts.csv` from Step 3.2
+- `Metadata.csv`: `Sample_ID` in the first column, and the columns `Genotype`, `Tissue` (`F` or `L`), `Temperature` and `Time`. The sample IDs must match the column names of the count file. The trait section (section 10) is written for these columns, so edit it for a different experiment.
+- `2_References/gene_annotation.gff`, used only for the hub gene annotation table. If the file is not found, everything else still runs.
+
+**What it does.** Genes with fewer than 1 CPM in at least 20% of the samples (and at least 3 samples) are removed, the counts are transformed with a variance stabilizing transformation, and the 5000 most variable genes are used to build a signed network (bicor correlation, minimum module size 30, modules with eigengenes closer than 0.25 are merged). The soft-thresholding power is the lowest one with a scale-free fit R2 of at least 0.80, or the best one if none reaches it. These settings are in section 3.
+
+**Panels.** Each panel is saved as its own TIFF in `Figures/`:
+
+| Panel | Content |
+| --- | --- |
+| A | Soft threshold: scale independence and mean connectivity |
+| B | Gene dendrogram with modules and per-treatment-group correlation rows |
+| C | Eigengene dendrogram and adjacency heat map |
+| D | TOM heat map of a random subsample of genes |
+| E | Module-trait heat map (Genotype, Tissue, Temperature, Time) |
+| F | Module-group heat map, one column per treatment group |
+| G | Module membership against gene significance for Genotype within Flower and within Leaf |
+| H | Expression heat map and eigengene bar plot of the focal modules |
+| I | Co-expression network of the top 5 hub genes of each module in `panel_I_modules`, plus a 2x2 combined image |
+
+The focal modules for G and H are the modules most correlated with Genotype within Flower and within Leaf. Module colors depend on your data, so run the script once, check `Module_Sizes.csv`, and then set `panel_I_modules` in section 23. The 2x2 image is written for 4 modules.
+
+**Other outputs** in `5_Results/8_WGCNA/`:
+
+- Tables: `Filtered_Counts.csv`, `VST_Expression_Matrix.csv`, `WGCNA_Selected_Genes.csv`, `WGCNA_Trait_Matrix.csv`, `Soft_Thresholding_Results.csv`, `Module_Sizes.csv`, `Module_Eigengenes.csv`, `Module_Trait_Correlations.csv`, `Module_Group_Correlations.csv`, `Gene_Module_Membership_KME.csv`, `Gene_Trait_Significance.csv` and `Complete_Gene_WGCNA_Information.csv` (with their p-value files)
+- `Hub_Genes/Hub_Genes_<module>.csv`: all genes with |kME| of at least `KME_THRESHOLD` (0.80) in each module
+- `Top_5_Hub_Genes_Per_Module.csv`, `Table_1_Top_5_Hub_Genes.csv` and `Hub_Gene_Annotation_Table.csv`: the hub genes shown in Panel I, with the annotation from the GFF
+- `WGCNA_Network.rds`, `Module_Eigengenes.rds`, `WGCNA_Expression_Matrix.rds` and `Complete_WGCNA_Analysis.RData`
+- `01_Sample_Clustering.pdf`, `02_Sample_Correlation_Heatmap.pdf` and `07_Module_Size.pdf`
+
 ## Single-end reads
 
 Both shell scripts default to paired-end. For single-end data:
 
-**`1_Bulk_RNA_Seq_fastp.sh`**
+**`1_Bulk_RNASeq_fastp.sh`**
 
 1. In the `for` loop and in `basename`, change `_1.fq.gz` to your single-end file suffix (for example `*.fq.gz` and `.fq.gz`).
 2. Set `filename1=${sample}.fq.gz` (same suffix).

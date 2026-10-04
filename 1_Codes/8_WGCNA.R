@@ -1,6 +1,11 @@
-###############################################################################
-# WEIGHTED GENE CO-EXPRESSION NETWORK ANALYSIS (WGCNA)
-# Tomato RNA-seq data (Genotype x Tissue x Temperature x Time)
+# ==========================================================
+# 8_WGCNA.R by Md Jahid Hasan Jone
+# Weighted gene co-expression network analysis (WGCNA)
+# ==========================================================
+# What this script does:
+#   Reads the gene count matrix from step 3.2 and Metadata.csv, removes low-expression genes,
+#   applies a variance stabilizing transformation (VST), keeps the most variable genes and builds
+#   a signed co-expression network. Every panel is saved standalone (1000 dpi TIFF):
 #
 #   A.  Soft threshold (scale independence + mean connectivity)
 #   B.  Gene dendrogram, modules, + per-treatment-group correlation rows
@@ -12,34 +17,46 @@
 #   H.  Module expression heatmap + eigengene barplot, per focal module
 #   I.  Module co-expression network graph, hub genes in red
 #
-# Focal modules for panels G, H, I are the modules most correlated with
-# Genotype-within-Flower and Genotype-within-Leaf (as you specified earlier).
+# Focal modules for panels G and H are the modules most correlated with
+# Genotype-within-Flower and Genotype-within-Leaf. Panel I uses the modules
+# listed in "panel_I_modules" (section 23).
 #
-# Table 1 equivalent: Hub_Gene_Annotation_Table.csv -- needs a gene
-# annotation file (see ANNOTATION SETTINGS below). Table 1 always lists
-# exactly the hub genes shown in Panel I (same modules, same top-5 genes).
+# Table 1 equivalent: Hub_Gene_Annotation_Table.csv. It needs a gene annotation file
+# (the GFF, see section 3). Table 1 always lists exactly the hub genes shown in Panel I
+# (same modules, same top-5 genes).
 #
-# Every panel is saved standalone (1000 dpi TIFF). Figures 1 and 2 (the
-# main-text composites of B+F+H and panel I) are no longer assembled here --
-# panels are placed into the manuscript individually instead. The
-# combine_panels_to_figure() helper in section 3 is kept because Panel I
-# still uses it (in grid form) to combine its 4 module figures into one
-# 2x2 image; see section 23.3b. Text set to a minimum of 10 pt throughout.
-###############################################################################
+# Panel I combines its module figures into one 2x2 image with the combine_panels_grid()
+# helper in section 3 (see section 23.3b). Text is set to a minimum of 10 pt throughout.
+#
+# Metadata.csv must have Sample_ID as the 1st column and the columns Genotype, Tissue,
+# Temperature and Time (Tissue values F = Flower, L = Leaf).
+#
+# ----------------------------------------------------------
+# HOW TO EDIT THE SCRIPT
+# ----------------------------------------------------------
+#   Paths (section 3): replace /.../.../ with the path to your project folder. Each input
+#     file can also be picked in a window with file.choose() (see the Option 2 lines).
+#   Network settings (section 3): number of genes, filtering, module size, merge height, network type.
+#   Modules in Panel I (section 23): module colors depend on your data. Run the script once,
+#     check Module_Sizes.csv, then edit "panel_I_modules". The 2x2 figure in section 23.3b
+#     is written for exactly 4 modules; edit that part too if you change the number.
+#   Different experiment: the traits in section 10 use the metadata columns Genotype, Tissue,
+#     Temperature and Time (and Tissue = F / L). Edit section 10 if your metadata differs.
+# ==========================================================
 
 
-###############################################################################
-# 1. CLEAN ENVIRONMENT
-###############################################################################
+# -----------------------------
+# 1. Clean environment
+# -----------------------------
 
 rm(list = ls())
 gc()
 options(stringsAsFactors = FALSE)
 
 
-###############################################################################
-# 2. PACKAGES
-###############################################################################
+# -----------------------------
+# 2. Packages
+# -----------------------------
 
 cran_packages <- c("WGCNA", "ggplot2", "pheatmap", "RColorBrewer", "igraph", "magick")
 bioc_packages <- c("DESeq2", "impute", "preprocessCore")
@@ -69,34 +86,62 @@ options(stringsAsFactors = FALSE)
 cor <- WGCNA::cor
 
 
-###############################################################################
-# 3. USER SETTINGS
-###############################################################################
+# -----------------------------
+# 3. User settings
+# -----------------------------
 
-count_file    <- "R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/New_Name/Results/3_tximport/gene_counts.csv"
-metadata_file <- "R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/Metadata.csv"
+# Input files  <- EDIT
+# There are two ways to give each input file. Use ONE of them per file and comment out the other:
+#   Option 1 (default): direct path. Replace /.../.../ with the path to your project folder.
+#   Option 2: file.choose() opens a window to pick the file (needs an interactive R session such
+#             as RStudio, so it does not work in a bsub job). To use it, remove the # from the
+#             "message" and "file.choose()" lines and put a # in front of the direct-path line.
 
-# GFF3 file (ITAG4.0), used to build the Table 1 hub gene annotation from
-# the mRNA "Note=" field. EDIT this path:
-gff_file <- "R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/Reference/ITAG4.0_gene_models.gff"
+# Gene count csv from step 3.2 (Gene_ID = 1st column, samples = other columns)
+# Option 1: direct path
+count_file    <- "/.../.../Bulk_RNA_seq/5_Results/3_tximport/gene_counts.csv"
 
-output_dir  <- "R:/Md_Jahid_Hasan_Jone/Experiments_and_Data/5_RNA_seq/New_Name/Results/8_WGCNA"
+# Option 2: choose the file in a window
+#message("Choose the GENE COUNT csv file (Gene_ID = 1st column, samples = other columns)")
+#count_file <- file.choose()
+
+# Metadata csv (Sample_ID = 1st column; columns Genotype, Tissue, Temperature, Time)
+# Option 1: direct path
+metadata_file <- "/.../.../Bulk_RNA_seq/Metadata.csv"
+
+# Option 2: choose the file in a window
+#message("Choose the METADATA csv file (Sample_ID = 1st column)")
+#metadata_file <- file.choose()
+
+# GFF3 file (ITAG4.0), used to build the Table 1 hub gene annotation from the mRNA "Note=" field.
+# If the file is not found, the rest of the analysis still runs and only Table 1 is skipped.
+# Option 1: direct path
+gff_file <- "/.../.../Bulk_RNA_seq/2_References/gene_annotation.gff"
+
+# Option 2: choose the file in a window
+#message("Choose the GFF3 annotation file (gene_annotation.gff)")
+#gff_file <- file.choose()
+
+# Output folder  <- EDIT
+output_dir  <- "/.../.../Bulk_RNA_seq/5_Results/8_WGCNA"
 figures_dir <- file.path(output_dir, "Figures")
 
 if (!dir.exists(output_dir))  dir.create(output_dir, recursive = TRUE)
 if (!dir.exists(figures_dir)) dir.create(figures_dir, recursive = TRUE)
 
-N_GENES          <- 5000
-MIN_CPM          <- 1
-MIN_SAMPLE_PROP  <- 0.20
-MIN_MODULE_SIZE  <- 30
-MERGE_CUT_HEIGHT <- 0.25
-NETWORK_TYPE     <- "signed"
-CORRELATION_FUNCTION <- "bicor"
-KME_THRESHOLD    <- 0.80
+# Network settings  <- EDIT if needed
+N_GENES          <- 5000      # number of most variable genes used to build the network (a smaller value is used if fewer pass the filter)
+MIN_CPM          <- 1         # a gene is kept if it has at least this CPM ...
+MIN_SAMPLE_PROP  <- 0.20      # ... in at least this fraction of samples (and in at least 3 samples)
+MIN_MODULE_SIZE  <- 30        # smallest module, in genes
+MERGE_CUT_HEIGHT <- 0.25      # modules whose eigengenes are closer than this are merged
+NETWORK_TYPE     <- "signed"  # "signed" or "unsigned"
+CORRELATION_FUNCTION <- "bicor"   # "bicor" or "pearson"
+KME_THRESHOLD    <- 0.80      # a gene is saved as a hub gene if its absolute module membership |kME| is at least this
 
-N_GENES_TOM_PLOT <- 1000
-EDGE_WEIGHT_THRESHOLD <- 0.15
+# Plot settings
+N_GENES_TOM_PLOT <- 1000      # random gene subsample drawn in the TOM heatmap (panel D)
+EDGE_WEIGHT_THRESHOLD <- 0.15 # weakest connection drawn in the network graphs (panel I)
 
 FIG_DPI       <- 1000
 FIG_POINTSIZE <- 10
@@ -109,26 +154,16 @@ save_panel_tiff <- function(filename, width_in, height_in, plot_fun) {
   dev.off()
 }
 
-# combine_panels_to_figure() -- assembles a multi-panel Figure by stacking
+# combine_panels_to_figure() -- assembles a multi-panel figure by stacking
 # ALREADY-RENDERED, standalone panel TIFFs (read from disk with magick and
 # resized to a common width), rather than re-calling the panel plot
 # functions inside a shared layout()/par(mfrow) block.
 #
-# This is the fix for the two combined-figure bugs:
-#  - Several panel functions (plotDendroAndColors for B, TOMplot for D)
-#    call layout()/par() internally. When several such functions are
-#    called one after another inside an outer layout(), each call resets
-#    the device's layout, so only the LAST plot drawn (panel D) actually
-#    ends up visible -- this is why Figure 1 showed only panel D.
-#  - Panel F needs wide left/bottom margins (par(mar = c(12, 10, 4, 3)))
-#    for its many treatment-group labels. Squeezed into a small layout
-#    cell inside Figure 2, those margins no longer fit the cell and R
-#    throws "figure margins too large" -- this is the Figure 2 failure.
-#
-# Compositing pre-rendered rasters sidesteps both problems: each panel is
-# drawn to its own independent device at its natural size, so its internal
-# layout()/par() calls can't clobber any other panel, and its margins
-# never have to fit inside an undersized cell.
+# Several panel functions (plotDendroAndColors for B, TOMplot for D) call
+# layout()/par() internally, and panel F needs wide margins for its many
+# treatment-group labels. Inside one shared layout these calls overwrite each
+# other or fail with "figure margins too large". Each panel is therefore drawn
+# to its own device first and the finished images are combined afterwards.
 combine_panels_to_figure <- function(panel_files, out_file, target_width_px = 3000) {
   missing_files <- panel_files[!file.exists(panel_files)]
   if (length(missing_files) > 0) {
@@ -167,9 +202,9 @@ combine_panels_grid <- function(panel_files_matrix, out_file,
 }
 
 
-###############################################################################
-# 4. READ RAW COUNT MATRIX
-###############################################################################
+# -----------------------------
+# 4. Read raw count matrix
+# -----------------------------
 
 counts <- read.csv(count_file, header = TRUE, row.names = 1, check.names = FALSE)
 counts <- as.matrix(counts)
@@ -181,9 +216,9 @@ if (anyDuplicated(rownames(counts)) > 0) counts <- counts[!duplicated(rownames(c
 counts <- counts[rowSums(counts) > 0, , drop = FALSE]
 
 
-###############################################################################
-# 5. READ METADATA AND MATCH SAMPLES
-###############################################################################
+# -----------------------------
+# 5. Read metadata and match samples
+# -----------------------------
 
 metadata <- read.csv(metadata_file, header = TRUE, row.names = 1, check.names = FALSE)
 count_samples <- colnames(counts)
@@ -197,9 +232,9 @@ if (!identical(rownames(metadata), colnames(counts))) stop("Metadata sample orde
 write.csv(metadata, file.path(output_dir, "Metadata_used_for_WGCNA.csv"))
 
 
-###############################################################################
-# 6. FILTER LOW-EXPRESSION GENES
-###############################################################################
+# -----------------------------
+# 6. Filter low-expression genes
+# -----------------------------
 
 library_sizes <- colSums(counts)
 cpm_matrix <- sweep(counts, 2, library_sizes, "/") * 1e6
@@ -210,9 +245,9 @@ counts_filtered <- counts[keep_genes, , drop = FALSE]
 write.csv(counts_filtered, file.path(output_dir, "Filtered_Counts.csv"))
 
 
-###############################################################################
-# 7. DESEQ2 + VST (with local-fit fallback for large multi-factor datasets)
-###############################################################################
+# -----------------------------
+# 7. DESeq2 + VST (with local-fit fallback for large multi-factor datasets)
+# -----------------------------
 
 for (i in seq_len(ncol(metadata))) {
   if (is.character(metadata[[i]])) metadata[[i]] <- factor(metadata[[i]])
@@ -237,9 +272,9 @@ vst_matrix <- assay(vsd)
 write.csv(vst_matrix, file.path(output_dir, "VST_Expression_Matrix.csv"))
 
 
-###############################################################################
-# 8. SELECT MOST VARIABLE GENES
-###############################################################################
+# -----------------------------
+# 8. Select most variable genes
+# -----------------------------
 
 gene_variance <- apply(vst_matrix, 1, var, na.rm = TRUE)
 variance_table <- data.frame(Gene = rownames(vst_matrix), Variance = gene_variance)
@@ -253,9 +288,9 @@ write.csv(variance_table[match(selected_genes, variance_table$Gene), ],
           file.path(output_dir, "WGCNA_Selected_Genes.csv"), row.names = FALSE)
 
 
-###############################################################################
-# 9. BUILD WGCNA EXPRESSION MATRIX AND QC
-###############################################################################
+# -----------------------------
+# 9. Build WGCNA expression matrix and QC
+# -----------------------------
 
 datExpr <- as.data.frame(t(expression_wgcna))
 gsg <- goodSamplesGenes(datExpr, verbose = 3)
@@ -276,15 +311,14 @@ pheatmap(cor(t(datExpr), method = "pearson"), main = "Sample Correlation",
 dev.off()
 
 
-###############################################################################
-# 10. BUILD TRAIT MATRICES
+# -----------------------------
+# 10. Build trait matrices
 #     trait_matrix          -- one column per factor level + the two
 #                               Genotype-within-tissue traits
 #     trait_matrix_combined -- one column per exact treatment group
 #                               (Genotype x Tissue x Temperature x Time),
-#                               used for panels B and F, matching how the
-#                               cotton paper defines its "groups" (LM72, ZMS0, ...)
-###############################################################################
+#                               used for panels B and F (for example 1_F_T0_24h)
+# -----------------------------
 
 trait_matrix_list <- list()
 for (trait_name in colnames(metadata)) {
@@ -334,9 +368,9 @@ sample_order <- order(metadata$Genotype, metadata$Tissue, metadata$Temperature, 
 group_order  <- unique(metadata$Combined_Treatment[sample_order])
 
 
-###############################################################################
-# 11. PANEL A -- SOFT-THRESHOLDING POWER
-###############################################################################
+# -----------------------------
+# 11. Panel A - soft-thresholding power
+# -----------------------------
 
 powers <- c(1:10, seq(12, 30, by = 2))
 sft <- pickSoftThreshold(datExpr, powerVector = powers, networkType = NETWORK_TYPE,
@@ -362,9 +396,9 @@ save_panel_tiff(file.path(figures_dir, "Panel_A_Soft_Thresholding.tiff"), 10, 5,
                 function() { par(mfrow = c(1, 2)); plot_panel_A1(); plot_panel_A2() })
 
 
-###############################################################################
-# 12. NETWORK CONSTRUCTION AND MODULES
-###############################################################################
+# -----------------------------
+# 12. Network construction and modules
+# -----------------------------
 
 net <- blockwiseModules(datExpr, power = softPower, TOMType = NETWORK_TYPE,
                         minModuleSize = MIN_MODULE_SIZE, reassignThreshold = 0,
@@ -380,11 +414,11 @@ module_sizes <- module_sizes[order(module_sizes$Gene_Count, decreasing = TRUE), 
 write.csv(module_sizes, file.path(output_dir, "Module_Sizes.csv"), row.names = FALSE)
 
 
-###############################################################################
-# 13. PANEL B -- GENE DENDROGRAM + MODULES + PER-GROUP CORRELATION ROWS
+# -----------------------------
+# 13. Panel B - gene dendrogram + modules + per-group correlation rows
 #     One extra color row per treatment group: red = genes positively
 #     correlated with that group, green = negatively correlated (numbers2colors).
-###############################################################################
+# -----------------------------
 
 GS_group <- cor(datExpr, trait_matrix_combined, use = "pairwise.complete.obs")
 GS_group_colors <- apply(GS_group, 2, numbers2colors, signed = TRUE)
@@ -405,9 +439,9 @@ save_panel_tiff(file.path(figures_dir, "Panel_B_Dendrogram_and_Groups.tiff"),
                 12, 4 + 0.25 * ncol(dendro_colors), plot_panel_B)
 
 
-###############################################################################
-# 14. MODULE EIGENGENES
-###############################################################################
+# -----------------------------
+# 14. Module eigengenes
+# -----------------------------
 
 MEs <- moduleEigengenes(datExpr, colors = moduleColors)$eigengenes
 MEs <- orderMEs(MEs)
@@ -417,9 +451,9 @@ ME_cor  <- cor(MEs, method = "pearson")
 ME_tree <- hclust(as.dist(1 - ME_cor), method = "average")
 
 
-###############################################################################
-# 15. PANEL C -- EIGENGENE DENDROGRAM + ADJACENCY HEATMAP
-###############################################################################
+# -----------------------------
+# 15. Panel C - eigengene dendrogram + adjacency heatmap
+# -----------------------------
 
 plot_panel_C1 <- function() {
   par(mar = c(2, 4, 3, 1))
@@ -436,9 +470,9 @@ save_panel_tiff(file.path(figures_dir, "Panel_C_Eigengene_Network.tiff"), 11, 6,
                 function() { par(mfrow = c(1, 2)); plot_panel_C1(); plot_panel_C2() })
 
 
-###############################################################################
-# 16. PANEL D -- TOM NETWORK HEATMAP (random gene subsample)
-###############################################################################
+# -----------------------------
+# 16. Panel D - TOM network heatmap (random gene subsample)
+# -----------------------------
 
 set.seed(1)
 tom_plot_genes <- if (ncol(datExpr) > N_GENES_TOM_PLOT) sample(colnames(datExpr), N_GENES_TOM_PLOT) else colnames(datExpr)
@@ -458,14 +492,12 @@ plot_panel_D <- function() {
 }
 save_panel_tiff(file.path(figures_dir, "Panel_D_TOM_Heatmap.tiff"), 8, 8, plot_panel_D)
 
-# Panels A, C, D are supplementary-only (QC / diagnostics) -- saved standalone
-# above, not part of Figure 1. Figure 1 is assembled later, after panel H,
-# from panels B + F + H (see section 22b).
+# Panels A, C, D are QC / diagnostic panels, saved standalone above.
 
 
-###############################################################################
-# 17. PANEL E -- MODULE-TRAIT HEATMAP (factor-level traits)
-###############################################################################
+# -----------------------------
+# 17. Panel E - module-trait heatmap (factor-level traits)
+# -----------------------------
 
 moduleTraitCor <- cor(MEs, trait_matrix, use = "pairwise.complete.obs", method = "pearson")
 moduleTraitPvalue <- moduleTraitCor
@@ -490,9 +522,9 @@ plot_panel_E <- function() {
 save_panel_tiff(file.path(figures_dir, "Panel_E_Module_Trait_Heatmap.tiff"), 10, 8, plot_panel_E)
 
 
-###############################################################################
-# 18. PANEL F -- MODULE-GROUP HEATMAP, one column per treatment group  [Fig. 4B]
-###############################################################################
+# -----------------------------
+# 18. Panel F - module-group heatmap, one column per treatment group
+# -----------------------------
 
 moduleGroupCor <- cor(MEs, trait_matrix_combined, use = "pairwise.complete.obs")
 moduleGroupPvalue <- corPvalueStudent(moduleGroupCor, nSamples = nrow(datExpr))
@@ -515,9 +547,9 @@ plot_panel_F <- function() {
 save_panel_tiff(file.path(figures_dir, "Panel_F_Module_Group_Heatmap.tiff"), 10, 8, plot_panel_F)
 
 
-###############################################################################
-# 19. GENE MODULE MEMBERSHIP (kME) AND GENE SIGNIFICANCE (NA-safe)
-###############################################################################
+# -----------------------------
+# 19. Gene module membership (kME) and gene significance (NA-safe)
+# -----------------------------
 
 geneModuleMembership <- cor(datExpr, MEs, use = "pairwise.complete.obs", method = "pearson")
 geneModuleMembershipPvalue <- corPvalueStudent(geneModuleMembership, nSamples = nrow(datExpr))
@@ -571,10 +603,10 @@ for (trait_name in colnames(geneSignificance)) {
 write.csv(gene_info, file.path(output_dir, "Complete_Gene_WGCNA_Information.csv"), row.names = FALSE)
 
 
-###############################################################################
-# 20. FOCAL MODULES (Genotype within Flower / within Leaf)
+# -----------------------------
+# 20. Focal modules (Genotype within Flower / within Leaf)
 #     Reused by panels G, H, I.
-###############################################################################
+# -----------------------------
 
 best_module_for_trait <- function(trait_name) {
   cors <- moduleTraitCor[, trait_name]
@@ -594,9 +626,9 @@ if (module_flower == module_leaf) {
 }
 
 
-###############################################################################
-# 21. PANEL G -- MODULE MEMBERSHIP vs. GENE SIGNIFICANCE
-###############################################################################
+# -----------------------------
+# 21. Panel G - module membership vs. gene significance
+# -----------------------------
 
 make_mm_gs_plot <- function(module, trait_name, display_label, panel_label) {
   function() {
@@ -633,10 +665,8 @@ combine_panels_grid(
 file.remove(G1_file, G2_file)
 
 
-
-
-###############################################################################
-# 22. PANEL H -- MODULE EXPRESSION HEATMAP + EIGENGENE BARPLOT
+# -----------------------------
+# 22. Panel H - module expression heatmap + eigengene barplot
 #
 #     One module only: Flower
 #     Panel size: 10" wide x 8" high (heatmap 5", barplot 3")
@@ -647,7 +677,7 @@ file.remove(G1_file, G2_file)
 #     wider panels (B, E, F). 10" wide keeps Panel H's text-to-panel-width
 #     ratio in line with those panels, and gives the 16 treatment-group
 #     labels on the barplot's x-axis enough room to not overlap.
-###############################################################################
+# -----------------------------
 
 group_breaks <- cumsum(
   rle(metadata$Combined_Treatment[sample_order])$lengths
@@ -655,13 +685,11 @@ group_breaks <- cumsum(
 
 group_breaks <- group_breaks[-length(group_breaks)] / nrow(metadata)
 
-
 # ---------------------------------------------------------------------------
 # H1. HEATMAP
 # ---------------------------------------------------------------------------
 
 plot_panel_H_heatmap <- function() {
-  
   module <- module_flower
   
   module_genes <- colnames(datExpr)[moduleColors == module]
@@ -720,13 +748,11 @@ plot_panel_H_heatmap <- function() {
   )
 }
 
-
 # ---------------------------------------------------------------------------
 # H2. BARPLOT
 # ---------------------------------------------------------------------------
 
 plot_panel_H_barplot <- function() {
-  
   module <- module_flower
   
   me_col <- paste0("ME", module)
@@ -754,7 +780,6 @@ plot_panel_H_barplot <- function() {
   )
 }
 
-
 # ---------------------------------------------------------------------------
 # H3. SAVE PANEL H
 # ---------------------------------------------------------------------------
@@ -767,7 +792,6 @@ save_panel_tiff(
   10,
   8,
   function() {
-    
     layout(
       matrix(
         c(1, 2),
@@ -783,8 +807,8 @@ save_panel_tiff(
 )
 
 
-###############################################################################
-# 23. PANEL I -- TOP-5 HUB GENE CO-EXPRESSION NETWORKS
+# -----------------------------
+# 23. Panel I - top-5 hub gene co-expression networks
 #
 #     Four modules (green dropped -- too few genes for a meaningful network):
 #       Panel_I_Blue.tiff
@@ -803,13 +827,15 @@ save_panel_tiff(
 #       2. Table 1
 #
 #     Hub ranking = absolute module membership (|kME|)
-###############################################################################
+# -----------------------------
 
 TOP_HUB_GENES <- 5
 
-# Modules to show in Panel I and list in Table 1. Green excluded: it has
-# too few genes for a meaningful hub network (check Module_Sizes.csv if
-# other modules ever need dropping for the same reason).
+# Modules to show in Panel I and list in Table 1.  <- EDIT
+# Module colors depend on your data, so run the script once and check Module_Sizes.csv first.
+# Here green is excluded because it has too few genes for a meaningful hub network.
+# Every name must be a module color that exists in your results. The 2x2 figure in section 23.3b
+# is written for exactly 4 modules: edit it if you use a different number.
 panel_I_modules <- c(
   "blue",
   "brown",
@@ -817,15 +843,13 @@ panel_I_modules <- c(
   "yellow"
 )
 
-
-###############################################################################
-# 23.1 SELECT TOP-5 HUB GENES
-###############################################################################
+# -----------------------------
+# 23.1 Select top-5 hub genes
+# -----------------------------
 
 top5_hub_genes <- list()
 
 for (module in panel_I_modules) {
-  
   ME_name <- paste0("ME", module)
   
   module_genes <- gene_info[
@@ -858,7 +882,6 @@ for (module in panel_I_modules) {
   top5_hub_genes[[module]] <- module_genes
 }
 
-
 # Combine all modules into one table
 top5_hub_table <- do.call(rbind, top5_hub_genes)
 rownames(top5_hub_table) <- NULL
@@ -870,13 +893,11 @@ write.csv(
   row.names = FALSE
 )
 
-
-###############################################################################
-# 23.2 NETWORK FUNCTION
-###############################################################################
+# -----------------------------
+# 23.2 Network function
+# -----------------------------
 
 make_hub_network <- function(module, tissue_code, tissue_label) {
-  
   # Samples from the selected tissue
   sample_ids <- rownames(metadata)[metadata$Tissue == tissue_code]
   
@@ -1024,18 +1045,16 @@ make_hub_network <- function(module, tissue_code, tissue_label) {
   )
 }
 
-
-###############################################################################
-# 23.3 CREATE ONE FIGURE FOR EACH MODULE
+# -----------------------------
+# 23.3 Create one figure for each module
 #
 #     Flower = F
 #     Leaf   = L
 #
 #     Each figure = 6.27 x 3 inches
-###############################################################################
+# -----------------------------
 
 for (module in panel_I_modules) {
-  
   plot_flower <- function() {
     make_hub_network(
       module = module,
@@ -1066,22 +1085,19 @@ for (module in panel_I_modules) {
     6.27,
     3,
     function() {
-      
       par(
         mfrow = c(1, 2)
       )
       
       plot_flower()
       plot_leaf()
-      
     }
   )
 }
 
-
-###############################################################################
-# 23.3b COMBINE THE 4 MODULE FIGURES INTO ONE 2x2 FIGURE
-###############################################################################
+# -----------------------------
+# 23.3b Combine the 4 module figures into one 2x2 figure
+# -----------------------------
 
 panel_I_files <- setNames(
   file.path(
@@ -1099,15 +1115,13 @@ combine_panels_grid(
   out_file = file.path(figures_dir, "Panel_I_Combined_2x2.tiff")
 )
 
-
-###############################################################################
-# 23.4 OPTIONAL: LIST ALL PANEL-I FIGURES CREATED
-###############################################################################
+# -----------------------------
+# 23.4 Optional: list all panel-I figures created
+# -----------------------------
 
 cat("\nPanel I figures created:\n")
 
 for (module in panel_I_modules) {
-  
   cat(
     "  ",
     file.path(
@@ -1125,23 +1139,22 @@ for (module in panel_I_modules) {
 cat("  ", file.path(figures_dir, "Panel_I_Combined_2x2.tiff"), "(combined)\n")
 
 
-
-###############################################################################
-# 24. TABLE 1 -- TOP-5 HUB GENES WITH GENE ANNOTATION
+# -----------------------------
+# 24. Table 1 - top-5 hub genes with gene annotation
 #
 #     IMPORTANT:
 #     Table 1 uses EXACTLY the same top-5 genes selected above for Panel I.
 #
 #     Therefore:
 #       Panel I hub genes = Table 1 hub genes
-###############################################################################
+# -----------------------------
 
-###############################################################################
-# 24.2 SAVE ALL KME-THRESHOLD HUB GENES AS SUPPLEMENTARY DATA
+# -----------------------------
+# 24.2 Save all kME-threshold hub genes as supplementary data
 #
 #     This section is independent of the top-5 selection.
 #     It preserves all genes satisfying KME_THRESHOLD.
-###############################################################################
+# -----------------------------
 
 hub_dir <- file.path(
   output_dir,
@@ -1158,7 +1171,6 @@ if (!dir.exists(hub_dir)) {
 hub_gene_tables <- list()
 
 for (module in module_names) {
-  
   ME_name <- paste0("ME", module)
   
   module_genes <- gene_info[
@@ -1168,7 +1180,6 @@ for (module in module_names) {
   ]
   
   if (ME_name %in% colnames(module_genes)) {
-    
     module_genes$KME <-
       abs(module_genes[[ME_name]])
     
@@ -1204,29 +1215,23 @@ for (module in module_names) {
   }
 }
 
-
-###############################################################################
-# 24.3 TABLE 1 = EXACT TOP-5 GENES USED IN PANEL I
-###############################################################################
+# -----------------------------
+# 24.3 Table 1 = exact top-5 genes used in Panel I
+# -----------------------------
 
 Table1_hub_genes <- top5_hub_table
 
-
-###############################################################################
-# 24.4 GFF ANNOTATION
-###############################################################################
+# -----------------------------
+# 24.4 GFF annotation
+# -----------------------------
 
 if (nrow(Table1_hub_genes) == 0) {
-  
   warning(
     "No top hub genes were selected. ",
     "Table 1 was not created."
   )
-  
 } else if (file.exists(gff_file)) {
-  
   get_field <- function(x, key) {
-    
     pattern <- paste0(
       key,
       "=([^;]+)"
@@ -1256,7 +1261,6 @@ if (nrow(Table1_hub_genes) == 0) {
     )
   }
   
-  
   # Read mRNA records
   mrna_lines <- grep(
     "\tmRNA\t",
@@ -1265,15 +1269,12 @@ if (nrow(Table1_hub_genes) == 0) {
   )
   
   if (length(mrna_lines) == 0) {
-    
     warning(
       "No '\\tmRNA\\t' lines found in GFF file: ",
       gff_file,
       "\nTable 1 annotation was not created."
     )
-    
   } else {
-    
     attrs <- vapply(
       strsplit(
         mrna_lines,
@@ -1322,7 +1323,6 @@ if (nrow(Table1_hub_genes) == 0) {
       row.names = FALSE
     )
     
-    
     ###########################################################################
     # MERGE TOP-5 HUB GENES WITH ANNOTATION
     ###########################################################################
@@ -1344,7 +1344,6 @@ if (nrow(Table1_hub_genes) == 0) {
       all.x = TRUE
     )
     
-    
     # Sort by module and rank
     Table1 <- Table1[
       order(
@@ -1354,7 +1353,6 @@ if (nrow(Table1_hub_genes) == 0) {
       ,
       drop = FALSE
     ]
-    
     
     ###########################################################################
     # SAVE TABLE 1
@@ -1369,7 +1367,6 @@ if (nrow(Table1_hub_genes) == 0) {
       row.names = FALSE
     )
     
-    
     ###########################################################################
     # ALSO KEEP THE ORIGINAL TABLE NAME
     ###########################################################################
@@ -1382,7 +1379,6 @@ if (nrow(Table1_hub_genes) == 0) {
       ),
       row.names = FALSE
     )
-    
     
     ###########################################################################
     # ANNOTATION MATCH RATE
@@ -1402,11 +1398,8 @@ if (nrow(Table1_hub_genes) == 0) {
       "%\n",
       sep = ""
     )
-    
   }
-  
 } else {
-  
   warning(
     "GFF file not found at: ",
     gff_file,
@@ -1414,17 +1407,15 @@ if (nrow(Table1_hub_genes) == 0) {
   )
 }
 
-
-###############################################################################
-# 24.5 PRINT THE EXACT GENES USED IN PANEL I AND TABLE 1
-###############################################################################
+# -----------------------------
+# 24.5 Print the exact genes used in Panel I and Table 1
+# -----------------------------
 
 cat("\n============================================================\n")
 cat("TOP-5 HUB GENES USED IN BOTH PANEL I AND TABLE 1\n")
 cat("============================================================\n")
 
 for (module in panel_I_modules) {
-  
   cat(
     "\n",
     toupper(module),
@@ -1433,7 +1424,6 @@ for (module in panel_I_modules) {
   )
   
   if (!is.null(top5_hub_genes[[module]])) {
-    
     print(
       top5_hub_genes[[module]][
         ,
@@ -1445,9 +1435,7 @@ for (module in panel_I_modules) {
         drop = FALSE
       ]
     )
-    
   } else {
-    
     cat("No genes available.\n")
   }
 }
@@ -1457,11 +1445,9 @@ cat("Panel I and Table 1 use the EXACT SAME top-5 hub genes.\n")
 cat("============================================================\n")
 
 
-
-
-###############################################################################
-# 25. MODULE SIZE BAR PLOT (supplementary)
-###############################################################################
+# -----------------------------
+# 25. Module size bar plot (supplementary)
+# -----------------------------
 
 module_sizes$Module <- factor(module_sizes$Module, levels = module_sizes$Module)
 p_module_size <- ggplot(module_sizes, aes(x = Module, y = Gene_Count)) +
@@ -1474,9 +1460,9 @@ p_module_size <- ggplot(module_sizes, aes(x = Module, y = Gene_Count)) +
 ggsave(file.path(output_dir, "07_Module_Size.pdf"), p_module_size, width = 9, height = 6)
 
 
-###############################################################################
-# 26. SAVE OBJECTS
-###############################################################################
+# -----------------------------
+# 26. Save objects
+# -----------------------------
 
 saveRDS(net, file.path(output_dir, "WGCNA_Network.rds"))
 saveRDS(datExpr, file.path(output_dir, "WGCNA_Expression_Matrix.rds"))
@@ -1490,14 +1476,14 @@ save(counts, counts_filtered, vst_matrix, datExpr, metadata,
      file = file.path(output_dir, "Complete_WGCNA_Analysis.RData"))
 
 
-###############################################################################
-# 27. FINAL SUMMARY
-###############################################################################
+# -----------------------------
+# 27. Final summary
+# -----------------------------
 
 cat("\nWGCNA finished.\n")
 cat("Genes used:", ncol(datExpr), " Samples:", nrow(datExpr), " Modules:", length(module_names), " Power:", softPower, "\n")
 cat("Focal modules -- Genotype within Flower:", module_flower, " | Genotype within Leaf:", module_leaf, "\n")
 cat("Figures:\n ", normalizePath(figures_dir), "\n")
-cat("Panels A-H saved standalone as Panel_*.tiff, used individually (no Figure 1/2 composite)\n")
+cat("Panels A-H saved standalone as Panel_*.tiff (no multi-panel composite)\n")
 cat("Panel I: 4 standalone module figures (green dropped) + Panel_I_Combined_2x2.tiff\n")
 cat("Table 1 equivalent: Hub_Gene_Annotation_Table.csv, hub genes match panel I exactly (requires gff_file to exist)\n")
