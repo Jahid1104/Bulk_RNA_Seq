@@ -517,7 +517,7 @@ go_raw <-
 go_raw$Gene <-
   str_extract(
     go_raw$Gene,
-    "Solyc[0-9]{2}g[0-9]+\\.[0-9]+"
+    "Solyc[0-9]{2}g[0-9]+"
   )
 
 go_raw <-
@@ -981,7 +981,7 @@ read_deseq <- function(file) {
   result$Gene <-
     str_extract(
       result$Gene,
-      "Solyc[0-9]{2}g[0-9]+(?:\\.[0-9]+)?"
+      "Solyc[0-9]{2}g[0-9]+"
     )
 
   result <-
