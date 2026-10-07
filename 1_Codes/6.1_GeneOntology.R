@@ -108,7 +108,7 @@ filter <- dplyr::filter
 
 PADJ_CUTOFF <- 0.05   # <- EDIT: adjusted p-value cutoff for a significant DEG
 
-LFC_CUTOFF <- 1       # <- EDIT: |log2 fold change| cutoff (1 = 2-fold). Step 5 uses lfc_cutoff = 2 for its Up/Down calls; set the same value here if you want the same DEGs
+LFC_CUTOFF <- 2       # <- EDIT: |log2 fold change| cutoff (1 = 2-fold).
 
 # ------------------------------------------------------------
 # Number of GO terms for functional annotation

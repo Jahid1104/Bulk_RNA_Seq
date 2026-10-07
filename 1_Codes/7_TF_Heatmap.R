@@ -53,7 +53,7 @@ library(extrafont)
 # -----------------------------
 # 1. Font (Times New Roman, gene names italic)
 # -----------------------------
-loadfonts(device = "win", quiet = TRUE)   # Windows. Use device = "pdf" on Mac/Linux
+loadfonts(device = if (.Platform$OS.type == "windows") "win" else "pdf", quiet = TRUE)   # Windows. Use device = "pdf" on Mac/Linux
 FONT <- "Times New Roman"                 # <- EDIT: use "serif" here if this font isn't found
 
 

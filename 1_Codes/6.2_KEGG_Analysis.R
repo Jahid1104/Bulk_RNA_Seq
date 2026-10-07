@@ -158,7 +158,7 @@ names(comparison_files) <- letters[seq_along(comparison_names)]
 
 # ---- DEG thresholds ----------------------------------------------------------
 PADJ_CUTOFF <- 0.05   # <- EDIT: adjusted p-value cutoff for a significant DEG
-LFC_CUTOFF  <- 1      # <- EDIT: |log2FoldChange| > 1  ==  2-fold change. Step 5 uses lfc_cutoff = 2 for its Up/Down calls; set the same value here if you want the same DEGs
+LFC_CUTOFF  <- 2      # <- EDIT: |log2FoldChange| > 1  ==  2-fold change.
 
 # ---- KEGG enrichment settings (used for the statistical record tables only) --
 MIN_GS_SIZE <- 3

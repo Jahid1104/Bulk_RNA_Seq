@@ -1,6 +1,6 @@
 # Bulk RNA-Seq Workflow
 
-Scripts for a bulk RNA-seq analysis of tomato, from raw reads to a gene count matrix and downstream analysis. Reads are trimmed with fastp and quantified with Salmon against the ITAG4.0 transcriptome. Transcript estimates are summarized to genes with tximport.
+Scripts for a bulk RNA-seq analysis, from raw reads to a gene count matrix and downstream analysis. Reads are trimmed with fastp and quantified with Salmon against the transcriptome (cDNA fasta file). Transcript estimates are summarized to genes with tximport. In this repository, we used tomato heat stress tolerance as an example.
 
 The trimming and quantification scripts are LSF job scripts (`bsub`) and run paired-end reads by default. The changes for single-end reads are listed in [Single-end reads](#single-end-reads).
 
@@ -11,7 +11,10 @@ Author: Md Jahid Hasan Jone
 | Step | Script | What it does |
 | --- | --- | --- |
 | 1 | `1_Bulk_RNASeq_fastp.sh` | Trims and filters raw reads with fastp; writes an HTML and JSON report per sample |
+| 1 (helper) | `fastp_summary_from_json_files.py` | Reads the fastp `.json` files in `5_Results/1_fastp/` and writes `fastp_summary.xlsx` there, one row per sample (read counts, Q20/Q30, GC content, filtered reads, duplication rate, adapter-trimmed reads) |
+| 1 (helper) | `Fastp_HTML_to_PowerPoint.py` | Opens the fastp `.html` files in `5_Results/1_fastp/` in a headless browser and writes `fastp_charts.pptx` there, one slide per sample with all fastp charts (paired-end reports) |
 | 2 | `2_Salmon.sh` | Builds the Salmon index (if missing) and quantifies each sample |
+| 2 (helper) | `collect_salmon_mapping_rate.py` | Reads `aux_info/meta_info.json` in each sample folder of `5_Results/2_Salmon/` and writes `salmon_mapping_rates.csv` there with the percent of reads mapped and the library type per sample |
 | 3.1 | `3.1_make_tx2gene.R` | Builds the transcript-to-gene table from the GFF |
 | 3.2 | `3.2_tximport_combined.R` | Imports Salmon output with tximport and writes gene count and TPM tables |
 | 4 | `4_Sample_Relationship_Analysis.py` | Combined figure: PCA, sample correlation heat map and expression violin plot |
@@ -20,20 +23,67 @@ Author: Md Jahid Hasan Jone
 | 6.2 | `6.2_KEGG_Analysis.R` | KEGG pathway annotation and enrichment of the same DEGs, with the same two figures |
 | 7 | `7_TF_Heatmap.R` | Heat map of the log2 fold change of a list of selected genes (for example transcription factors) across selected comparisons, with significance stars |
 | 8 | `8_WGCNA.R` | WGCNA co-expression network analysis: modules, module-trait heat maps, hub genes and a hub gene annotation table |
-
-Helper scripts: `fastp_summary_from_json_files.ipynb`, `Fastp_HTML_to_PowerPoint.ipynb`, `collect_salmon_mapping_rate.py`, `submit_R.sh`.
+| 8 (helper) | `submit_R.sh` | LSF job script that runs `8_WGCNA.R` with `Rscript` (`bsub < submit_R.sh`) |
 
 ## Requirements
 
-- An LSF cluster with `bsub`, and conda
-- A conda environment containing `fastp` and `salmon`
-- Python 3 with `pandas`, `numpy`, `matplotlib`, `seaborn` and `scikit-learn`
-- R with these packages: `rtracklayer`, `dplyr`, `readr`, `stringr`, `tximport`
-- For step 5, also: `DESeq2` (Bioconductor), `ggplot2`, `ggrepel`, `pheatmap`, `RColorBrewer`, `ggVennDiagram`, `extrafont` and `patchwork`. The script installs any that are missing.
-- For step 6.1, also: `topGO` (Bioconductor), `ggplot2`, `dplyr`, `tidyr`, `stringr`, `readr`, `purrr`, `tibble` and `ggtext`. The script installs any that are missing.
-- For step 6.2, also: `clusterProfiler` and `KEGGREST` (Bioconductor), `jsonlite`, `ragg` and the packages used in step 6.1 except `topGO`. The script installs any that are missing, and needs an internet connection the first time it runs (it downloads the KEGG pathway tables).
-- For step 7, also: `pheatmap`, `RColorBrewer` and `extrafont`. The script installs any that are missing.
-- For step 8, also: `WGCNA`, `DESeq2`, `impute` and `preprocessCore` (Bioconductor), `ggplot2`, `pheatmap`, `RColorBrewer`, `igraph` and `magick`. The script installs any that are missing.
+### Linux HPC
+
+- An LSF cluster (`bsub`) with conda
+- A conda environment with `fastp` and `salmon`:
+
+```bash
+conda create -n rnaseq -c bioconda -c conda-forge fastp salmon
+```
+
+- R and Python available on the cluster (for example `module load R`)
+- ImageMagick and the usual system libraries for the R packages `magick` and `igraph` (step 8). On a cluster these are often available as modules.
+
+### Python
+
+Python 3.9 or newer. Step 4 needs:
+
+```bash
+pip install pandas numpy matplotlib seaborn scikit-learn
+```
+
+The helper scripts run from VS Code or a terminal. `collect_salmon_mapping_rate.py` needs nothing extra. `fastp_summary_from_json_files.py` needs `openpyxl`, and `Fastp_HTML_to_PowerPoint.py` needs `python-pptx`, `playwright` and `pillow`, plus a one-time browser download:
+
+```bash
+pip install openpyxl python-pptx playwright pillow
+playwright install chromium
+```
+
+On Linux, if Chromium does not start, also run `playwright install-deps chromium`.
+
+### R
+
+Install everything the R scripts use in one go. `BiocManager::install()` handles both Bioconductor and CRAN packages:
+
+```r
+if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+
+bioc_pkgs <- c("tximport", "rtracklayer", "DESeq2", "topGO", "clusterProfiler",
+               "KEGGREST", "impute", "preprocessCore", "GO.db", "AnnotationDbi")
+
+cran_pkgs <- c("dplyr", "tidyr", "readr", "stringr", "purrr", "tibble", "jsonlite",
+               "ggplot2", "ggrepel", "ggtext", "ggVennDiagram", "patchwork", "ragg",
+               "pheatmap", "RColorBrewer", "extrafont", "WGCNA", "igraph", "magick")
+
+BiocManager::install(c(bioc_pkgs, cran_pkgs), ask = FALSE, update = FALSE)
+```
+
+| Packages | Used in |
+| --- | --- |
+| `rtracklayer`, `dplyr`, `readr` | 3.1 |
+| `tximport`, `readr`, `stringr` | 3.2 |
+| `DESeq2`, `ggplot2`, `ggrepel`, `pheatmap`, `RColorBrewer`, `ggVennDiagram`, `extrafont`, `patchwork` | 5 |
+| `topGO`, `ggplot2`, `dplyr`, `tidyr`, `stringr`, `readr`, `purrr`, `tibble`, `ggtext` | 6.1 |
+| `clusterProfiler`, `KEGGREST`, `jsonlite`, `ragg`, plus the CRAN packages of 6.1 | 6.2 (needs an internet connection the first time, to download the KEGG pathway tables) |
+| `pheatmap`, `RColorBrewer`, `extrafont` | 7 |
+| `WGCNA`, `DESeq2`, `impute`, `preprocessCore`, `ggplot2`, `pheatmap`, `RColorBrewer`, `igraph`, `magick` | 8 |
+
+The scripts for steps 5 to 8 also install any missing package themselves, so the block above is optional.
 
 ## Folder structure
 
@@ -52,13 +102,13 @@ Bulk_RNA_seq/
 │   ├── 6.2_KEGG_Analysis.R
 │   ├── 7_TF_Heatmap.R
 │   ├── 8_WGCNA.R
-│   ├── fastp_summary_from_json_files.ipynb
-│   ├── Fastp_HTML_to_PowerPoint.ipynb
+│   ├── fastp_summary_from_json_files.py
+│   ├── Fastp_HTML_to_PowerPoint.py
 │   ├── collect_salmon_mapping_rate.py
 │   └── submit_R.sh
 ├── 2_References/
-│   ├── gene_annotation.gff
 │   ├── ITAG4.0_cDNA.fasta
+│   ├── ITAG4.0_gene_models.gff
 │   ├── ITAG4.0_goterms.txt
 │   ├── go-basic.obo
 │   └── query.ko.txt
@@ -87,17 +137,17 @@ mkdir -p Bulk_RNA_seq/{1_Codes,2_References,3_Raw_Reads,4_Trimmed_Reads} \
 
 ## Before you run anything
 
-The scripts contain placeholder paths written as `/.../.../`. Replace them with your own paths in every script:
+Change these three things in the scripts:
 
-- `INPUTDIR`, `OUTPUTDIR`, `RESULTDIR`, `seq_path`
-- the conda environment path in `conda activate ...`
-- the GFF, tx2gene and `quant.sf` paths in the R scripts
-- `counts_file`, `meta_file` and `output_dir` in `5_DESeq2_Analysis.R` (or use `file.choose()` for the two input files, see Step 5)
-- `go_file`, `obo_file`, `deseq_dir` and `output_dir` in `6.1_GeneOntology.R`, and `ko_file`, `deseq_dir` and `output_dir` in `6.2_KEGG_Analysis.R` (or use `file.choose()` for the input files, see Step 6)
-- `deseq2_dir`, `gene_file` and `output_dir` in `7_TF_Heatmap.R` (or use `file.choose()` for the gene list, see Step 7)
-- `count_file`, `metadata_file`, `gff_file` and `output_dir` in `8_WGCNA.R` (or use `file.choose()` for the input files, see Step 8)
+1. **File paths.** Every path starts with the placeholder `/.../.../Bulk_RNA_seq/`. Replace `/.../.../` with the folder that holds your `Bulk_RNA_seq` project folder. To do it in all scripts at once, run this from `1_Codes` (replace `/your/path` with your own path):
 
-The GFF (`gene_annotation.gff`) and the transcriptome fasta must come from the same ITAG4.0 release. If they don't, transcript IDs in Salmon output won't match the tx2gene table.
+```bash
+sed -i 's#/\.\.\./\.\.\./Bulk_RNA_seq#/your/path/Bulk_RNA_seq#g' *.sh *.R *.py
+```
+
+2. **Sample name in `3.1_make_tx2gene.R`.** The last check reads `5_Results/2_Salmon/.../quant.sf`. Replace the `...` with the name of any sample folder.
+
+3. **Conda location.** In `1_Bulk_RNASeq_fastp.sh` and `2_Salmon.sh`, change the path in `conda activate /.../.../usrapps/group/gatk_rnaseq` to the conda environment that has `fastp` and `salmon`.
 
 ## Name your sequencing files correctly
 
@@ -149,6 +199,8 @@ Builds the index in `2_References/salmon_tmt_index` if it does not exist yet, th
 Set `transcriptome` in the script to your reference transcriptome fasta.
 
 ## Step 3.1: Transcript-to-gene table
+
+The GFF (`ITAG4.0_gene_models.gff`) and the transcriptome fasta must come from the same ITAG4.0 release, otherwise transcript IDs in the Salmon output will not match this table.
 
 Run `3.1_make_tx2gene.R` in RStudio or with `Rscript`. It keeps the `mRNA` features from the GFF and saves `2_References/tx2gene.csv` with two columns, `TXNAME` and `GENEID`. The `mRNA:` and `gene:` prefixes are removed if present.
 
@@ -347,13 +399,13 @@ Written to `5_Results/7_TF/`:
 
 ## Step 8: WGCNA (`8_WGCNA.R`)
 
-Run it in R (RStudio or `Rscript`), or submit it as a job from `1_Codes` with `bsub < submit_R.sh`. The job script allows 20 minutes (`#BSUB -W 20`), which may be too short for 5000 genes and 1000 dpi figures, so raise it if the job stops. `file.choose()` only works in an interactive R session, so use direct paths for a job.
+Run it in R (RStudio or `Rscript`), or submit it as a job with `bsub < submit_R.sh`. The job script allows 20 minutes (`#BSUB -W 20`), which may be too short for 5000 genes and 1000 dpi figures, so raise it if the job stops. `file.choose()` only works in an interactive R session, so use direct paths for a job.
 
 **Input files.**
 
 - `gene_counts.csv` from Step 3.2
 - `Metadata.csv`: `Sample_ID` in the first column, and the columns `Genotype`, `Tissue` (`F` or `L`), `Temperature` and `Time`. The sample IDs must match the column names of the count file. The trait section (section 10) is written for these columns, so edit it for a different experiment.
-- `2_References/gene_annotation.gff`, used only for the hub gene annotation table. If the file is not found, everything else still runs.
+- `2_References/ITAG4.0_gene_models.gff`, used only for the hub gene annotation table. If the file is not found, everything else still runs.
 
 **What it does.** Genes with fewer than 1 CPM in at least 20% of the samples (and at least 3 samples) are removed, the counts are transformed with a variance stabilizing transformation, and the 5000 most variable genes are used to build a signed network (bicor correlation, minimum module size 30, modules with eigengenes closer than 0.25 are merged). The soft-thresholding power is the lowest one with a scale-free fit R2 of at least 0.80, or the best one if none reaches it. These settings are in section 3.
 

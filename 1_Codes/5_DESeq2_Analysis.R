@@ -92,7 +92,7 @@ library(patchwork)
 #then you can comment it out again:
 
 #font_import()
-loadfonts(device = "win", quiet = TRUE)   # Windows. Use device = "pdf" on Mac/Linux
+loadfonts(device = if (.Platform$OS.type == "windows") "win" else "pdf", quiet = TRUE)   # Windows. Use device = "pdf" on Mac/Linux
 FONT <- "Times New Roman"                 # <- EDIT: use "serif" here if this font isn't found
 
 theme_set(theme_bw(base_family = FONT) + theme(text = element_text(family = FONT)))
