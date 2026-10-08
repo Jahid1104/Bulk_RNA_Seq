@@ -221,6 +221,7 @@ counts <- counts[rowSums(counts) > 0, , drop = FALSE]
 # -----------------------------
 
 metadata <- read.csv(metadata_file, header = TRUE, row.names = 1, check.names = FALSE)
+metadata$Genotype <- factor(metadata$Genotype)
 count_samples <- colnames(counts)
 
 if (length(setdiff(count_samples, rownames(metadata))) > 0) stop("Sample mismatch between counts and metadata.")

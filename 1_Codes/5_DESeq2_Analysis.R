@@ -136,6 +136,7 @@ counts <- as.matrix(round(counts))          # DESeq2 needs integer counts
 
 meta <- read.csv(meta_file, row.names = "Sample_ID")
 meta <- meta[colnames(counts), , drop = FALSE]   # align sample order to the count matrix
+meta$Genotype <- factor(meta$Genotype)
 #View(meta)
 
 
@@ -470,11 +471,11 @@ ggsave(file.path(output_dir, "Figures", "DEG_Summary_BarPlot.tiff"),
 
 
 # -----------------------------
-# 10. Venn diagram (all comparisons, single diagram)
+# 10. Venn diagram (six selected comparisons, single diagram)
 # -----------------------------
 # https://gaospecial.github.io/ggVennDiagram/
 # ggVennDiagram natively draws 2-7 sets as circles/ellipses/polygons. With
-# more than 7 sets (as here) it switches to an upset plot instead, which is
+# more than 7 sets it switches to an upset plot instead, which is
 # a composite of several sub-plots rather than one ggplot object -- so the
 # fill/theme layers below only get added when a real Venn is being drawn.
 

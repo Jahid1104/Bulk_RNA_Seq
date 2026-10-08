@@ -1003,9 +1003,9 @@ read_deseq <- function(file) {
     mutate(
       DEG =
         !is.na(padj) &
-        padj <= PADJ_CUTOFF &
+        padj < PADJ_CUTOFF &
         !is.na(log2FC) &
-        abs(log2FC) >= LFC_CUTOFF,
+        abs(log2FC) > LFC_CUTOFF,
       Direction =
         case_when(
           DEG &
