@@ -10,7 +10,7 @@ The workflow runs in three places:
 | Your computer, RStudio | Every R script: Steps 3.1, 3.2 and 5 to 8 |
 | Your computer, VS Code | Every Python script: Step 4 and the three helper scripts |
 
-After Step 2, you copy the fastp and Salmon results from the HPC to your computer (see [Copy the results to your computer](#copy-the-results-to-your-computer)). The two shell scripts run paired-end reads by default. The changes for single-end reads are listed in [Single-end reads](#single-end-reads).
+The HPC storage is mounted on your computer, so the HPC jobs and your local RStudio and VS Code sessions all read and write the same project folder. Nothing is uploaded or downloaded. Only the path to the folder differs (see [Before you run anything](#before-you-run-anything)). The two shell scripts run paired-end reads by default. The changes for single-end reads are listed in [Single-end reads](#single-end-reads).
 
 Author: Md Jahid Hasan Jone
 
@@ -133,11 +133,9 @@ Bulk_RNA_seq/
 └── Metadata.csv
 ```
 
-**On the HPC** you only need `1_Codes/1_Bulk_RNASeq_fastp.sh`, `1_Codes/2_Salmon.sh`, `2_References/ITAG4.0_cDNA.fasta`, the raw reads in `3_Raw_Reads/`, and the empty `4_Trimmed_Reads/`, `5_Results/1_fastp/` and `5_Results/2_Salmon/` folders.
+The project folder sits on the HPC storage that is mounted on your computer. The HPC sees it at its cluster path (for example `/share/group_name/user_name/Bulk_RNA_seq`) and your computer sees the same folder through the mount (for example `Z:/Bulk_RNA_seq` on Windows). Steps 1 and 2 only use `1_Codes/1_Bulk_RNASeq_fastp.sh`, `1_Codes/2_Salmon.sh`, `2_References/ITAG4.0_cDNA.fasta`, `3_Raw_Reads/`, `4_Trimmed_Reads/` and `5_Results/`. Put `Metadata.csv` and `5_Results/7_TF/TF_Genes.csv` in the project folder yourself.
 
-**On your computer** you need everything else: the rest of `1_Codes`, `2_References` (it comes with this repository), `Metadata.csv` and `5_Results/7_TF/TF_Genes.csv`. The fastp and Salmon results are copied over after Step 2.
-
-To create all the folders at once, run this from the directory where you want the project, on the HPC and on your computer (on Windows, use Git Bash or create the folders by hand). Add `Metadata.csv` and `5_Results/7_TF/TF_Genes.csv` yourself:
+To create all the folders at once, run this once from the directory where you want the project, in an HPC terminal (on Windows, if you create the folders from your computer instead, use Git Bash or make them by hand). Add `Metadata.csv` and `5_Results/7_TF/TF_Genes.csv` yourself:
 
 ```bash
 mkdir -p Bulk_RNA_seq/{1_Codes,2_References,3_Raw_Reads,4_Trimmed_Reads} \
@@ -146,7 +144,7 @@ mkdir -p Bulk_RNA_seq/{1_Codes,2_References,3_Raw_Reads,4_Trimmed_Reads} \
 
 ## Before you run anything
 
-The project folder has a different path on the HPC and on your computer, so each side gets its own path. Change these three things:
+The project folder is the same on both sides, but its path is not: the HPC uses the cluster path and your computer uses the mounted path. The shell scripts run on the HPC and the R and Python scripts run on your computer, so they get different paths even though they sit in the same `1_Codes` folder. Change these three things:
 
 **File paths.** Every path starts with the placeholder `/.../.../Bulk_RNA_seq/`. Replace `/.../.../` with the folder that holds your `Bulk_RNA_seq` project folder, as described next.
 
@@ -156,9 +154,9 @@ The project folder has a different path on the HPC and on your computer, so each
 sed -i 's#/\.\.\./\.\.\./Bulk_RNA_seq#/your/hpc/path/Bulk_RNA_seq#g' *.sh
 ```
 
-**Local paths.** Open the `1_Codes` folder in VS Code, press `Ctrl+Shift+H` (Replace in Files), search for `/.../.../Bulk_RNA_seq`, and replace it with your local path, for example `C:/Users/you/Documents/Bulk_RNA_seq`. Use forward slashes on Windows; R and Python both accept them. Set "files to include" to `*.R, *.py`. On Mac, Linux or Git Bash, the `sed` command above also works if you use `*.R *.py` instead of `*.sh`.
+**Local paths.** Open the `1_Codes` folder in VS Code, press `Ctrl+Shift+H` (Replace in Files), search for `/.../.../Bulk_RNA_seq`, and replace it with the mounted path of the project folder, for example `Z:/Bulk_RNA_seq` on Windows or `/Volumes/your_mount/Bulk_RNA_seq` on Mac. Use forward slashes on Windows; R and Python both accept them. Set "files to include" to `*.R, *.py`. On Mac, Linux or Git Bash, the `sed` command above also works if you use `*.R *.py` instead of `*.sh`.
 
-**Sample name in `3.1_make_tx2gene.R`.** The last check reads `5_Results/2_Salmon/.../quant.sf`. Replace the `...` with the name of any sample folder (the copy on your computer).
+**Sample name in `3.1_make_tx2gene.R`.** The last check reads `5_Results/2_Salmon/.../quant.sf`. Replace the `...` with the name of any sample folder.
 
 **Conda location (HPC only).** In `1_Bulk_RNASeq_fastp.sh` and `2_Salmon.sh`, change the path in `conda activate /.../.../usrapps/group/gatk_rnaseq` to the path of your conda environment that has `fastp` and `salmon` (`conda env list` shows the path). The scripts are written for an environment named `gatk_rnaseq`.
 
@@ -214,24 +212,6 @@ bjobs
 Builds the index in `2_References/salmon_tmt_index` if it does not exist yet, then quantifies every `TMD_*_1.fq.gz` pair in `4_Trimmed_Reads/`. Writes one folder per sample in `5_Results/2_Salmon/`, each containing `quant.sf`.
 
 Set `transcriptome` in the script to your reference transcriptome fasta.
-
-## Copy the results to your computer
-
-When Step 2 has finished, copy the fastp and Salmon results from the HPC into the same folders of the project on your computer. Run these on your computer, from the directory that holds `Bulk_RNA_seq` (replace the user name, host and paths with yours):
-
-```bash
-scp -r user@hpc.example.edu:/hpc/path/Bulk_RNA_seq/5_Results/1_fastp Bulk_RNA_seq/5_Results/
-scp -r user@hpc.example.edu:/hpc/path/Bulk_RNA_seq/5_Results/2_Salmon Bulk_RNA_seq/5_Results/
-```
-
-Each sample folder in `2_Salmon` holds `quant.sf` (needed by Step 3.2) and `aux_info/meta_info.json` (needed by `collect_salmon_mapping_rate.py`). To copy only those two files per sample, use rsync (Mac, Linux, WSL or Git Bash):
-
-```bash
-rsync -avm --include='*/' --include='quant.sf' --include='meta_info.json' --exclude='*' \
-  user@hpc.example.edu:/hpc/path/Bulk_RNA_seq/5_Results/2_Salmon/ Bulk_RNA_seq/5_Results/2_Salmon/
-```
-
-The trimmed reads and the Salmon index stay on the HPC. On Windows without these tools, WinSCP or MobaXterm does the same job. Once the files are on your computer, the two fastp helpers and `collect_salmon_mapping_rate.py` run from VS Code, and everything from Step 3.1 on runs locally.
 
 ## Step 3.1: Transcript-to-gene table
 
