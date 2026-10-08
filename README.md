@@ -2,7 +2,15 @@
 
 Scripts for a bulk RNA-seq analysis, from raw reads to a gene count matrix and downstream analysis. Reads are trimmed with fastp and quantified with Salmon against the transcriptome (cDNA fasta file). Transcript estimates are summarized to genes with tximport. In this repository, we used tomato heat stress tolerance as an example.
 
-The trimming and quantification scripts are LSF job scripts (`bsub`) and run paired-end reads by default. The changes for single-end reads are listed in [Single-end reads](#single-end-reads).
+The workflow runs in three places:
+
+| Where | What runs there |
+| --- | --- |
+| Linux HPC (LSF, `bsub`) | Steps 1 and 2: `1_Bulk_RNASeq_fastp.sh` and `2_Salmon.sh` |
+| Your computer, RStudio | Every R script: Steps 3.1, 3.2 and 5 to 8 |
+| Your computer, VS Code | Every Python script: Step 4 and the three helper scripts |
+
+After Step 2, you copy the fastp and Salmon results from the HPC to your computer (see [Copy the results to your computer](#copy-the-results-to-your-computer)). The two shell scripts run paired-end reads by default. The changes for single-end reads are listed in [Single-end reads](#single-end-reads).
 
 Author: Md Jahid Hasan Jone
 
@@ -23,42 +31,40 @@ Author: Md Jahid Hasan Jone
 | 6.2 | `6.2_KEGG_Analysis.R` | KEGG pathway annotation and enrichment of the same DEGs, with the same two figures |
 | 7 | `7_TF_Heatmap.R` | Heat map of the log2 fold change of a list of selected genes (for example transcription factors) across selected comparisons, with significance stars |
 | 8 | `8_WGCNA.R` | WGCNA co-expression network analysis: modules, module-trait heat maps, hub genes and a hub gene annotation table |
-| 8 (helper) | `submit_R.sh` | LSF job script that runs `8_WGCNA.R` with `Rscript` (`bsub < submit_R.sh`) |
 
 ## Requirements
 
-### Linux HPC
+### Linux HPC (Steps 1 and 2)
 
 - An LSF cluster (`bsub`) with conda
 - A conda environment with `fastp` and `salmon`:
 
 ```bash
-conda create -n rnaseq -c bioconda -c conda-forge fastp salmon
+conda create -n gatk_rnaseq -c bioconda -c conda-forge fastp salmon
 ```
 
-- R and Python available on the cluster (for example `module load R`)
-- ImageMagick and the usual system libraries for the R packages `magick` and `igraph` (step 8). On a cluster these are often available as modules.
+Nothing else is needed on the HPC. R and Python are not used there.
 
-### Python
+### Python (VS Code, on your computer)
 
-Python 3.9 or newer. Step 4 needs:
+Python 3.9 or newer, with the Python extension in VS Code. Step 4 needs:
 
 ```bash
 pip install pandas numpy matplotlib seaborn scikit-learn
 ```
 
-The helper scripts run from VS Code or a terminal. `collect_salmon_mapping_rate.py` needs nothing extra. `fastp_summary_from_json_files.py` needs `openpyxl`, and `Fastp_HTML_to_PowerPoint.py` needs `python-pptx`, `playwright` and `pillow`, plus a one-time browser download:
+The helper scripts also run in VS Code. `collect_salmon_mapping_rate.py` needs nothing extra. `fastp_summary_from_json_files.py` needs `openpyxl`, and `Fastp_HTML_to_PowerPoint.py` needs `python-pptx`, `playwright` and `pillow`, plus a one-time browser download:
 
 ```bash
 pip install openpyxl python-pptx playwright pillow
 playwright install chromium
 ```
 
-On Linux, if Chromium does not start, also run `playwright install-deps chromium`.
+On a Linux computer, if Chromium does not start, also run `playwright install-deps chromium`.
 
-### R
+### R (RStudio, on your computer)
 
-Install everything the R scripts use in one go. `BiocManager::install()` handles both Bioconductor and CRAN packages:
+Install R and RStudio, then install everything the R scripts use in one go. `BiocManager::install()` handles both Bioconductor and CRAN packages:
 
 ```r
 if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
@@ -83,11 +89,11 @@ BiocManager::install(c(bioc_pkgs, cran_pkgs), ask = FALSE, update = FALSE)
 | `pheatmap`, `RColorBrewer`, `extrafont` | 7 |
 | `WGCNA`, `DESeq2`, `impute`, `preprocessCore`, `ggplot2`, `pheatmap`, `RColorBrewer`, `igraph`, `magick` | 8 |
 
-The scripts for steps 5 to 8 also install any missing package themselves, so the block above is optional.
+The scripts for steps 5 to 8 also install any missing package themselves, so the block above is optional. On Windows and Mac, `magick` installs ImageMagick with it. On Linux, install the system libraries first (on Ubuntu, `libmagick++-dev`), and the same applies to the system libraries that `igraph` needs.
 
 ## Folder structure
 
-Create one project folder named `Bulk_RNA_seq` (the placeholder paths in the scripts use this spelling, and Linux is case-sensitive). Everything (scripts, references, reads, results, sample information) lives inside it.
+Create one project folder named `Bulk_RNA_seq` (the placeholder paths in the scripts use this spelling, and Linux is case-sensitive). Everything (scripts, references, reads, results, sample information) lives inside it. The same folder layout is used on the HPC and on your computer.
 
 ```
 Bulk_RNA_seq/
@@ -104,11 +110,10 @@ Bulk_RNA_seq/
 │   ├── 8_WGCNA.R
 │   ├── fastp_summary_from_json_files.py
 │   ├── Fastp_HTML_to_PowerPoint.py
-│   ├── collect_salmon_mapping_rate.py
-│   └── submit_R.sh
+│   └── collect_salmon_mapping_rate.py
 ├── 2_References/
 │   ├── ITAG4.0_cDNA.fasta
-│   ├── ITAG4.0_gene_models.gff
+│   ├── gene_annotation.gff
 │   ├── ITAG4.0_goterms.txt
 │   ├── go-basic.obo
 │   └── query.ko.txt
@@ -128,7 +133,11 @@ Bulk_RNA_seq/
 └── Metadata.csv
 ```
 
-To create all the folders at once, run this from the directory where you want the project (add `Metadata.csv` and `5_Results/7_TF/TF_Genes.csv` yourself):
+**On the HPC** you only need `1_Codes/1_Bulk_RNASeq_fastp.sh`, `1_Codes/2_Salmon.sh`, `2_References/ITAG4.0_cDNA.fasta`, the raw reads in `3_Raw_Reads/`, and the empty `4_Trimmed_Reads/`, `5_Results/1_fastp/` and `5_Results/2_Salmon/` folders.
+
+**On your computer** you need everything else: the rest of `1_Codes`, `2_References` (it comes with this repository), `Metadata.csv` and `5_Results/7_TF/TF_Genes.csv`. The fastp and Salmon results are copied over after Step 2.
+
+To create all the folders at once, run this from the directory where you want the project, on the HPC and on your computer (on Windows, use Git Bash or create the folders by hand). Add `Metadata.csv` and `5_Results/7_TF/TF_Genes.csv` yourself:
 
 ```bash
 mkdir -p Bulk_RNA_seq/{1_Codes,2_References,3_Raw_Reads,4_Trimmed_Reads} \
@@ -137,17 +146,21 @@ mkdir -p Bulk_RNA_seq/{1_Codes,2_References,3_Raw_Reads,4_Trimmed_Reads} \
 
 ## Before you run anything
 
-Change these three things in the scripts:
+The project folder has a different path on the HPC and on your computer, so each side gets its own path. Change these three things:
 
-1. **File paths.** Every path starts with the placeholder `/.../.../Bulk_RNA_seq/`. Replace `/.../.../` with the folder that holds your `Bulk_RNA_seq` project folder. To do it in all scripts at once, run this from `1_Codes` (replace `/your/path` with your own path):
+**File paths.** Every path starts with the placeholder `/.../.../Bulk_RNA_seq/`. Replace `/.../.../` with the folder that holds your `Bulk_RNA_seq` project folder, as described next.
+
+**HPC paths.** Run this from `1_Codes` on the HPC (replace `/your/hpc/path` with your own path):
 
 ```bash
-sed -i 's#/\.\.\./\.\.\./Bulk_RNA_seq#/your/path/Bulk_RNA_seq#g' *.sh *.R *.py
+sed -i 's#/\.\.\./\.\.\./Bulk_RNA_seq#/your/hpc/path/Bulk_RNA_seq#g' *.sh
 ```
 
-2. **Sample name in `3.1_make_tx2gene.R`.** The last check reads `5_Results/2_Salmon/.../quant.sf`. Replace the `...` with the name of any sample folder.
+**Local paths.** Open the `1_Codes` folder in VS Code, press `Ctrl+Shift+H` (Replace in Files), search for `/.../.../Bulk_RNA_seq`, and replace it with your local path, for example `C:/Users/you/Documents/Bulk_RNA_seq`. Use forward slashes on Windows; R and Python both accept them. Set "files to include" to `*.R, *.py`. On Mac, Linux or Git Bash, the `sed` command above also works if you use `*.R *.py` instead of `*.sh`.
 
-3. **Conda location.** In `1_Bulk_RNASeq_fastp.sh` and `2_Salmon.sh`, change the path in `conda activate /.../.../usrapps/group/gatk_rnaseq` to the conda environment that has `fastp` and `salmon`.
+**Sample name in `3.1_make_tx2gene.R`.** The last check reads `5_Results/2_Salmon/.../quant.sf`. Replace the `...` with the name of any sample folder (the copy on your computer).
+
+**Conda location (HPC only).** In `1_Bulk_RNASeq_fastp.sh` and `2_Salmon.sh`, change the path in `conda activate /.../.../usrapps/group/gatk_rnaseq` to the path of your conda environment that has `fastp` and `salmon` (`conda env list` shows the path). The scripts are written for an environment named `gatk_rnaseq`.
 
 ## Name your sequencing files correctly
 
@@ -176,6 +189,8 @@ Including genotype, treatment and replicate in the prefix helps (for example `To
 
 ## Step 1: Trim reads (fastp)
 
+Run this on the HPC.
+
 ```bash
 cd 1_Codes
 bsub < 1_Bulk_RNASeq_fastp.sh
@@ -189,6 +204,8 @@ Reads `3_Raw_Reads/`. Writes:
 
 ## Step 2: Quantify transcripts (Salmon)
 
+Run this on the HPC.
+
 ```bash
 bsub < 2_Salmon.sh
 bjobs
@@ -198,27 +215,47 @@ Builds the index in `2_References/salmon_tmt_index` if it does not exist yet, th
 
 Set `transcriptome` in the script to your reference transcriptome fasta.
 
+## Copy the results to your computer
+
+When Step 2 has finished, copy the fastp and Salmon results from the HPC into the same folders of the project on your computer. Run these on your computer, from the directory that holds `Bulk_RNA_seq` (replace the user name, host and paths with yours):
+
+```bash
+scp -r user@hpc.example.edu:/hpc/path/Bulk_RNA_seq/5_Results/1_fastp Bulk_RNA_seq/5_Results/
+scp -r user@hpc.example.edu:/hpc/path/Bulk_RNA_seq/5_Results/2_Salmon Bulk_RNA_seq/5_Results/
+```
+
+Each sample folder in `2_Salmon` holds `quant.sf` (needed by Step 3.2) and `aux_info/meta_info.json` (needed by `collect_salmon_mapping_rate.py`). To copy only those two files per sample, use rsync (Mac, Linux, WSL or Git Bash):
+
+```bash
+rsync -avm --include='*/' --include='quant.sf' --include='meta_info.json' --exclude='*' \
+  user@hpc.example.edu:/hpc/path/Bulk_RNA_seq/5_Results/2_Salmon/ Bulk_RNA_seq/5_Results/2_Salmon/
+```
+
+The trimmed reads and the Salmon index stay on the HPC. On Windows without these tools, WinSCP or MobaXterm does the same job. Once the files are on your computer, the two fastp helpers and `collect_salmon_mapping_rate.py` run from VS Code, and everything from Step 3.1 on runs locally.
+
 ## Step 3.1: Transcript-to-gene table
 
-The GFF (`ITAG4.0_gene_models.gff`) and the transcriptome fasta must come from the same ITAG4.0 release, otherwise transcript IDs in the Salmon output will not match this table.
+The GFF (`gene_annotation.gff`) and the transcriptome fasta must come from the same ITAG4.0 release, otherwise transcript IDs in the Salmon output will not match this table.
 
-Run `3.1_make_tx2gene.R` in RStudio or with `Rscript`. It keeps the `mRNA` features from the GFF and saves `2_References/tx2gene.csv` with two columns, `TXNAME` and `GENEID`. The `mRNA:` and `gene:` prefixes are removed if present.
+Run `3.1_make_tx2gene.R` in RStudio. It keeps the `mRNA` features from the GFF and saves `2_References/tx2gene.csv` with two columns, `TXNAME` and `GENEID`. The `mRNA:` and `gene:` prefixes are removed if present.
 
 The script ends with a check. Point it at any sample's `quant.sf`; the printed fraction should be close to 1. A low value means the transcript IDs in the GFF and the fasta do not match.
 
 ## Step 3.2: Count matrix (tximport)
 
-Run `3.2_tximport_combined.R`. It reads every `quant.sf` under `5_Results/2_Salmon/`, sorts the samples in natural order (`2F` before `10F`), and summarizes to genes with `countsFromAbundance = "lengthScaledTPM"`.
+Run `3.2_tximport_combined.R` in RStudio. It reads every `quant.sf` under `5_Results/2_Salmon/`, sorts the samples in natural order (`2F` before `10F`), and summarizes to genes with `countsFromAbundance = "lengthScaledTPM"`.
 
 Written to `5_Results/3_tximport/`:
 
-- `txi.rds`: the full tximport object, for DESeq2 later
+- `txi.rds`: the full tximport object, saved for reference (Step 5 reads `gene_counts.csv`, not this file)
 - `gene_counts.csv`
 - `TPM.csv`
 
 Each sample folder in `5_Results/2_Salmon/` must have a unique name, because the folder name becomes the column name.
 
 ## Step 4: Sample relationships
+
+Run `4_Sample_Relationship_Analysis.py` in VS Code (open the file and use Run Python File, or run this in the VS Code terminal):
 
 ```bash
 python 4_Sample_Relationship_Analysis.py
@@ -248,7 +285,7 @@ The figure is saved at 1000 dpi, and with many samples the PNG is large. Lower t
 
 ## Step 5: Differential expression (DESeq2)
 
-Run `5_DESeq2_Analysis.R` in R (RStudio or `Rscript`). It runs DESeq2 separately for every comparison in the `comparisons` list, then makes tables and figures for each comparison and for all comparisons together.
+Run `5_DESeq2_Analysis.R` in RStudio. It runs DESeq2 separately for every comparison in the `comparisons` list, then makes tables and figures for each comparison and for all comparisons together.
 
 **Experimental setup.** The script is written for this experiment:
 
@@ -269,7 +306,7 @@ Sample names follow `Genotype+Tissue_Temperature_Time_Replicate`, for example `2
 There are two ways to give the script each file. Use one per file and comment out the other:
 
 1. **Direct path (default).** Replace `/.../.../` in `counts_file` and `meta_file` with your project path.
-2. **`file.choose()`.** A window opens so you can pick the file. Remove the `#` from the `message(...)` and `file.choose()` lines for that file and put a `#` in front of the direct-path line. This needs an interactive R session such as RStudio.
+2. **`file.choose()`.** A window opens so you can pick the file. Remove the `#` from the `message(...)` and `file.choose()` lines for that file and put a `#` in front of the direct-path line. This works in RStudio.
 
 Set `output_dir` to your `5_Results/5_DESeq2` folder. The script creates the `Tables` and `Figures` subfolders it needs.
 
@@ -311,7 +348,7 @@ All figures are TIFF files saved at 1000 dpi.
 
 ## Step 6: GO and KEGG enrichment
 
-Both scripts read the DESeq2 result tables written by Step 5 (`5_Results/5_DESeq2/Tables/Comparisons/<name>_DESeq2_results.csv`). A gene is a DEG when `padj` is below `PADJ_CUTOFF` (0.05) and its absolute log2 fold change is above `LFC_CUTOFF` (1), set in section 2 of each script. Step 5 calls Up and Down genes with `lfc_cutoff = 2`, so set `LFC_CUTOFF` to 2 in Step 6 if you want the same DEGs.
+Both scripts read the DESeq2 result tables written by Step 5 (`5_Results/5_DESeq2/Tables/Comparisons/<name>_DESeq2_results.csv`). A gene is a DEG when `padj` is below `PADJ_CUTOFF` (0.05) and its absolute log2 fold change is above `LFC_CUTOFF` (2), set in section 2 of each script. These are the same cutoffs Step 5 uses for Up and Down genes (`padj_cutoff = 0.05`, `lfc_cutoff = 2`), so all three scripts call the same DEGs. If you change a cutoff in one script, change it in the others too.
 
 **Input files.**
 
@@ -337,7 +374,7 @@ Each name must match `name` in the `comparisons` list of `5_DESeq2_Analysis.R` e
 
 ### Step 6.1: Gene Ontology (`6.1_GeneOntology.R`)
 
-Run it in R (RStudio or `Rscript`). For each comparison, the up- and down-regulated genes are tested separately for each GO category (MF, CC, BP) with topGO (`weight01` algorithm, Fisher test, minimum node size 5). The background is all genes in the DESeq2 table that have a GO annotation. p-values are adjusted with Benjamini-Hochberg and called significant at FDR 0.05.
+Run it in RStudio. For each comparison, the up- and down-regulated genes are tested separately for each GO category (MF, CC, BP) with topGO (`weight01` algorithm, Fisher test, minimum node size 5). The background is all genes in the DESeq2 table that have a GO annotation. p-values are adjusted with Benjamini-Hochberg and called significant at FDR 0.05.
 
 Written to `5_Results/6.1_GO/`:
 
@@ -354,7 +391,7 @@ Thresholds, the number of terms shown, fonts and figure sizes are set in section
 
 ### Step 6.2: KEGG pathways (`6.2_KEGG_Analysis.R`)
 
-Run it in R. The script attaches K numbers from `query.ko.txt` to the DEGs, maps them to KEGG pathways, and keeps the five main KEGG categories (Metabolism, Genetic Information Processing, Environmental Information Processing, Cellular Processes, Organismal Systems). It downloads the pathway tables from KEGG on the first run and saves them in the output folder, so later runs work from the saved copies.
+Run it in RStudio. The script attaches K numbers from `query.ko.txt` to the DEGs, maps them to KEGG pathways, and keeps the five main KEGG categories (Metabolism, Genetic Information Processing, Environmental Information Processing, Cellular Processes, Organismal Systems). It downloads the pathway tables from KEGG on the first run and saves them in the output folder, so later runs work from the saved copies.
 
 Gene IDs in `query.ko.txt` and in the DESeq2 tables can differ by a trailing transcript number (`Solyc10g079470.3.1` and `Solyc10g079470.3`). The script tries a few ways of trimming the IDs, keeps the one that matches the DESeq2 IDs best, and prints the match rate. Check that number the first time you run it.
 
@@ -375,7 +412,7 @@ The number of pathways shown (`TOP_N_ANNOTATION`, `TOP_N_ENRICHMENT`), colors, f
 
 ## Step 7: Heat map of selected genes (`7_TF_Heatmap.R`)
 
-Run it in R (RStudio or `Rscript`). It takes a list of genes, such as transcription factors, and draws their log2 fold change across the comparisons you select.
+Run it in RStudio. It takes a list of genes, such as transcription factors, and draws their log2 fold change across the comparisons you select.
 
 **Input files.**
 
@@ -390,7 +427,7 @@ Each input can be given by a direct path (default) or picked in a window with `f
 
 **Heat map.** Colors show log2 fold change on a symmetric blue-white-red scale, so white is no change. Stars show the adjusted p-value (`*` below 0.05, `**` below 0.01, `***` below 0.001). Rows and columns are not clustered. The figure is 6.27 x 8 inches, which fits about 25 genes and 8 comparisons; change the width and height in section 7 for other sizes.
 
-**Fonts.** The figure uses Times New Roman through `extrafont`. `loadfonts(device = "win")` is for Windows; on Mac or Linux use `device = "pdf"`. If the font is not found, set `FONT <- "serif"`.
+**Fonts.** The figure uses Times New Roman through `extrafont`. The first time you use `extrafont` on a computer, run `font_import()` once in the R console (it takes a few minutes); this script does not run it for you, and you can skip it if you already did it for Step 5. `loadfonts(device = "win")` is for Windows; on Mac or Linux use `device = "pdf"`. If the font is not found, set `FONT <- "serif"`.
 
 Written to `5_Results/7_TF/`:
 
@@ -399,13 +436,13 @@ Written to `5_Results/7_TF/`:
 
 ## Step 8: WGCNA (`8_WGCNA.R`)
 
-Run it in R (RStudio or `Rscript`), or submit it as a job with `bsub < submit_R.sh`. The job script allows 20 minutes (`#BSUB -W 20`), which may be too short for 5000 genes and 1000 dpi figures, so raise it if the job stops. `file.choose()` only works in an interactive R session, so use direct paths for a job.
+Run it in RStudio. With 5000 genes and 1000 dpi figures it can take a while.
 
 **Input files.**
 
 - `gene_counts.csv` from Step 3.2
 - `Metadata.csv`: `Sample_ID` in the first column, and the columns `Genotype`, `Tissue` (`F` or `L`), `Temperature` and `Time`. The sample IDs must match the column names of the count file. The trait section (section 10) is written for these columns, so edit it for a different experiment.
-- `2_References/ITAG4.0_gene_models.gff`, used only for the hub gene annotation table. If the file is not found, everything else still runs.
+- `2_References/gene_annotation.gff`, used only for the hub gene annotation table. If the file is not found, everything else still runs.
 
 **What it does.** Genes with fewer than 1 CPM in at least 20% of the samples (and at least 3 samples) are removed, the counts are transformed with a variance stabilizing transformation, and the 5000 most variable genes are used to build a signed network (bicor correlation, minimum module size 30, modules with eigengenes closer than 0.25 are merged). The soft-thresholding power is the lowest one with a scale-free fit R2 of at least 0.80, or the best one if none reaches it. These settings are in section 3.
 
@@ -435,7 +472,7 @@ The focal modules for G and H are the modules most correlated with Genotype with
 
 ## Single-end reads
 
-Both shell scripts default to paired-end. For single-end data:
+Both shell scripts (run on the HPC) default to paired-end. Their loops look for `*_1.fq.gz` files and skip any sample that has no matching `_2.fq.gz`, so single-end files are skipped unless you make the changes below. The comment above the `fastp` command ("remove both lines for single end") only covers the `-I` and `-O` lines, not the loop. For single-end data:
 
 **`1_Bulk_RNASeq_fastp.sh`**
 
