@@ -9,7 +9,7 @@
 #      Processing, Environmental Information Processing, Cellular Processes,
 #      Organismal Systems).
 #   3. Reads the 8 DESeq2 result tables (a-h) and attaches K numbers to genes.
-#   4. Flags significant DEGs (padj < 0.05, |log2FC| > 1) and splits them
+#   4. Flags significant DEGs (padj < 0.05, |log2FC| > 2) and splits them
 #      into up- and down-regulated.
 #   5. Counts how many up/down DEGs map to each KEGG pathway
 #      (= "functional annotation").
@@ -158,7 +158,7 @@ names(comparison_files) <- letters[seq_along(comparison_names)]
 
 # ---- DEG thresholds ----------------------------------------------------------
 PADJ_CUTOFF <- 0.05   # <- EDIT: adjusted p-value cutoff for a significant DEG
-LFC_CUTOFF  <- 2      # <- EDIT: |log2FoldChange| > 1  ==  2-fold change.
+LFC_CUTOFF  <- 2      # <- EDIT: |log2FoldChange| > 2  ==  4-fold change.
 
 # ---- KEGG enrichment settings (used for the statistical record tables only) --
 MIN_GS_SIZE <- 3

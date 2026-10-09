@@ -1,4 +1,5 @@
 ##Bulk RNA Seq Data Analysis Workflow by Md Jahid Hasan Jone##
+##3.2_tximport_combined.R##
 
 library(tximport)
 library(readr)

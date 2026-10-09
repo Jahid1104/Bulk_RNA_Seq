@@ -1,4 +1,5 @@
 ##Bulk RNA Seq Data Analysis Workflow by Md Jahid Hasan Jone##
+##3.1_make_tx2gene.R##
 
 library(rtracklayer)
 library(dplyr)

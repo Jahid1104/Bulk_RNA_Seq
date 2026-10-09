@@ -1,5 +1,5 @@
 # ==========================================================
-# DESeq2_Analysis.R by Md Jahid Hasan Jone
+# 5_DESeq2_Analysis.R by Md Jahid Hasan Jone
 # Simple DESeq2 differential expression pipeline
 # ==========================================================
 # What this script does:

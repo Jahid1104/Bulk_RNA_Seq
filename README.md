@@ -116,7 +116,9 @@ Bulk_RNA_seq/
 │   ├── gene_annotation.gff
 │   ├── ITAG4.0_goterms.txt
 │   ├── go-basic.obo
-│   └── query.ko.txt
+│   ├── query.ko.txt
+│   ├── salmon_tmt_index/      (created by Step 2)
+│   └── tx2gene.csv            (created by Step 3.1)
 ├── 3_Raw_Reads/
 ├── 4_Trimmed_Reads/
 ├── 5_Results/
@@ -144,7 +146,7 @@ mkdir -p Bulk_RNA_seq/{1_Codes,2_References,3_Raw_Reads,4_Trimmed_Reads} \
 
 ## Before you run anything
 
-The project folder is the same on both sides, but its path is not: the HPC uses the cluster path and your computer uses the mounted path. The shell scripts run on the HPC and the R and Python scripts run on your computer, so they get different paths even though they sit in the same `1_Codes` folder. Change these three things:
+The project folder is the same on both sides, but its path is not: the HPC uses the cluster path and your computer uses the mounted path. The shell scripts run on the HPC and the R and Python scripts run on your computer, so they get different paths even though they sit in the same `1_Codes` folder. Change the following:
 
 **File paths.** Every path starts with the placeholder `/.../.../Bulk_RNA_seq/`. Replace `/.../.../` with the folder that holds your `Bulk_RNA_seq` project folder, as described next.
 
@@ -261,7 +263,7 @@ The script prints the group sizes and warns if every sample ends up in its own g
 
 **Fonts.** Sizes, weights and styles for all text are set in the `STYLE` dictionary at the top of the script.
 
-The figure is saved at 1000 dpi, and with many samples the PNG is large. Lower the `dpi` in the two `plt.savefig` calls if it runs out of memory.
+The figure is saved at 1000 dpi, and with many samples the PNG is large. Lower the `dpi` in the PNG `plt.savefig` call if it runs out of memory (the PDF is vector and has no `dpi`).
 
 ## Step 5: Differential expression (DESeq2)
 
@@ -292,6 +294,8 @@ Set `output_dir` to your `5_Results/5_DESeq2` folder. The script creates the `Ta
 
 **Parameters** (section 3 of the script): adjusted p-value cutoff (`padj_cutoff = 0.05`), log2 fold-change cutoff (`lfc_cutoff = 2`), the minimum total reads for a gene to be kept in a comparison (`min_gene_count = 10`), and how many genes are labeled on volcano plots and shown in heat maps.
 
+**Fold-change shrinkage.** For each comparison the script runs `results()` and then `lfcShrink(type = "normal")`. The `Up` and `Down` calls, the volcano and MA plots and the files read by Steps 6 and 7 all use the shrunken `log2FoldChange`, so the `lfc_cutoff` is applied to the shrunken value. `padj` comes from the Wald test before shrinkage.
+
 **Editing the comparisons.** Each comparison is one line in the `comparisons` list (section 5):
 
 ```r
@@ -319,12 +323,12 @@ The current list has 25 comparisons. For a different experiment, also edit the m
 
 - `Tables/Comparisons/<name>_DESeq2_results.csv`: full results for each comparison, with a `Regulation` column (`Up`, `Down` or `NS`)
 - `Tables/`: top genes per comparison, the top 10 genes overall for qPCR validation, the up/down gene counts per comparison, and legend files that match panel letters to comparison names
-- `Figures/Volcano_Plots/`, `Figures/MA_Plots/` and `Figures/Heatmaps/`: one figure per comparison (heat maps are skipped when a comparison has fewer than 2 DEGs)
-- `Figures/`: overall sample PCA, heat map of the most variable genes, bar plot of up/down gene counts, Venn diagram, and the combined MA and volcano figures
+- `Figures/Volcano_Plots/`, `Figures/MA_Plots/` and `Figures/Heatmaps/`: one figure per comparison (heat maps are skipped when a comparison has fewer than 2 DEGs). `Figures/Heatmaps/` also holds `Heatmap_TopVariableGenes_AllSamples.tiff`, the heat map of the most variable genes across all samples
+- `Figures/`: overall sample PCA, bar plot of up/down gene counts, Venn diagram, and the combined MA and volcano figures
 
 All figures are TIFF files saved at 1000 dpi.
 
-**Fonts.** Figures use Times New Roman through `extrafont`. The first time you use `extrafont` on a computer, run `font_import()` once (it takes a few minutes). The script loads fonts with `loadfonts(device = "win")`, which is for Windows; on Mac or Linux use `device = "pdf"` and set `FONT` to a font you have (for example `"serif"`).
+**Fonts.** Figures use Times New Roman through `extrafont`. The first time you use `extrafont` on a computer, run `font_import()` once (it takes a few minutes). The script picks the font device by itself (`"win"` on Windows, `"pdf"` on Mac and Linux), so nothing needs changing there. If Times New Roman is not found on your computer, set `FONT <- "serif"`.
 
 ## Step 6: GO and KEGG enrichment
 
@@ -371,7 +375,7 @@ Thresholds, the number of terms shown, fonts and figure sizes are set in section
 
 ### Step 6.2: KEGG pathways (`6.2_KEGG_Analysis.R`)
 
-Run it in RStudio. The script attaches K numbers from `query.ko.txt` to the DEGs, maps them to KEGG pathways, and keeps the five main KEGG categories (Metabolism, Genetic Information Processing, Environmental Information Processing, Cellular Processes, Organismal Systems). It downloads the pathway tables from KEGG on the first run and saves them in the output folder, so later runs work from the saved copies.
+Run it in RStudio. The script attaches K numbers from `query.ko.txt` to the DEGs, maps them to KEGG pathways, and keeps the five main KEGG categories (Metabolism, Genetic Information Processing, Environmental Information Processing, Cellular Processes, Organismal Systems). It downloads the pathway tables from KEGG on the first run and saves them in the output folder as `kegg_category_map.rds` and `ko_pathway_map.rds`, so later runs reuse those two copies. The `enrichKEGG()` step still contacts KEGG on every run; without an internet connection it is skipped with a warning and the rest of the script still runs.
 
 Gene IDs in `query.ko.txt` and in the DESeq2 tables can differ by a trailing transcript number (`Solyc10g079470.3.1` and `Solyc10g079470.3`). The script tries a few ways of trimming the IDs, keeps the one that matches the DESeq2 IDs best, and prints the match rate. Check that number the first time you run it.
 
@@ -384,6 +388,7 @@ Written to `5_Results/6.2_KEGG/`:
 - `03_DEG_tables/`: all, up and down DEGs for each comparison
 - `04_KEGG_enrichment/`: fold enrichment for all comparisons and the `enrichKEGG()` result for each comparison
 - `Pathway_Ranking_AllComparisons.csv`, `Top_Pathways_Figure1.csv` and `Top_Pathways_Figure2.csv`
+- `kegg_category_map.rds` and `ko_pathway_map.rds`: the saved KEGG tables described above
 - `Comparison_Key.csv`: which letter is which comparison
 - `Figure1_Functional_Annotation.tiff`: top 30 pathways with up and down DEG counts
 - `Figure2_Functional_Enrichment.tiff`: top 20 pathways by fold enrichment
@@ -407,7 +412,7 @@ Each input can be given by a direct path (default) or picked in a window with `f
 
 **Heat map.** Colors show log2 fold change on a symmetric blue-white-red scale, so white is no change. Stars show the adjusted p-value (`*` below 0.05, `**` below 0.01, `***` below 0.001). Rows and columns are not clustered. The figure is 6.27 x 8 inches, which fits about 25 genes and 8 comparisons; change the width and height in section 7 for other sizes.
 
-**Fonts.** The figure uses Times New Roman through `extrafont`. The first time you use `extrafont` on a computer, run `font_import()` once in the R console (it takes a few minutes); this script does not run it for you, and you can skip it if you already did it for Step 5. `loadfonts(device = "win")` is for Windows; on Mac or Linux use `device = "pdf"`. If the font is not found, set `FONT <- "serif"`.
+**Fonts.** The figure uses Times New Roman through `extrafont`. The first time you use `extrafont` on a computer, run `font_import()` once in the R console (it takes a few minutes); this script does not run it for you, and you can skip it if you already did it for Step 5. The script picks the font device by itself (`"win"` on Windows, `"pdf"` on Mac and Linux). If the font is not found, set `FONT <- "serif"`.
 
 Written to `5_Results/7_TF/`:
 
@@ -444,9 +449,9 @@ The focal modules for G and H are the modules most correlated with Genotype with
 
 **Other outputs** in `5_Results/8_WGCNA/`:
 
-- Tables: `Filtered_Counts.csv`, `VST_Expression_Matrix.csv`, `WGCNA_Selected_Genes.csv`, `WGCNA_Trait_Matrix.csv`, `Soft_Thresholding_Results.csv`, `Module_Sizes.csv`, `Module_Eigengenes.csv`, `Module_Trait_Correlations.csv`, `Module_Group_Correlations.csv`, `Gene_Module_Membership_KME.csv`, `Gene_Trait_Significance.csv` and `Complete_Gene_WGCNA_Information.csv` (with their p-value files)
+- Tables: `Filtered_Counts.csv`, `VST_Expression_Matrix.csv`, `WGCNA_Selected_Genes.csv`, `WGCNA_Trait_Matrix.csv`, `Soft_Thresholding_Results.csv`, `Module_Sizes.csv`, `Module_Eigengenes.csv`, `Module_Trait_Correlations.csv`, `Module_Group_Correlations.csv`, `Module_Group_Pvalues.csv`, `Combined_Experimental_Trait_Matrix.csv`, `Metadata_used_for_WGCNA.csv`, `Gene_Module_Membership_KME.csv`, `Gene_Trait_Significance.csv` and `Complete_Gene_WGCNA_Information.csv` (with their p-value files)
 - `Hub_Genes/Hub_Genes_<module>.csv`: all genes with |kME| of at least `KME_THRESHOLD` (0.80) in each module
-- `Top_5_Hub_Genes_Per_Module.csv`, `Table_1_Top_5_Hub_Genes.csv` and `Hub_Gene_Annotation_Table.csv`: the hub genes shown in Panel I, with the annotation from the GFF
+- `Top_5_Hub_Genes_Per_Module.csv`, `Table_1_Top_5_Hub_Genes.csv` and `Hub_Gene_Annotation_Table.csv`: the hub genes shown in Panel I, with the annotation from the GFF (the parsed GFF annotation is also saved as `ITAG4.0_Gene_Annotation.csv`)
 - `WGCNA_Network.rds`, `Module_Eigengenes.rds`, `WGCNA_Expression_Matrix.rds` and `Complete_WGCNA_Analysis.RData`
 - `01_Sample_Clustering.pdf`, `02_Sample_Correlation_Heatmap.pdf` and `07_Module_Size.pdf`
 

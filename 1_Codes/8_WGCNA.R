@@ -93,8 +93,7 @@ cor <- WGCNA::cor
 # Input files  <- EDIT
 # There are two ways to give each input file. Use ONE of them per file and comment out the other:
 #   Option 1 (default): direct path. Replace /.../.../ with the path to your project folder.
-#   Option 2: file.choose() opens a window to pick the file (needs an interactive R session such
-#             as RStudio, so it does not work in a bsub job). To use it, remove the # from the
+#   Option 2: file.choose() opens a window to pick the file. To use it, remove the # from the
 #             "message" and "file.choose()" lines and put a # in front of the direct-path line.
 
 # Gene count csv from step 3.2 (Gene_ID = 1st column, samples = other columns)

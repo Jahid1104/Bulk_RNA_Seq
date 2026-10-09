@@ -27,9 +27,11 @@ import sys
 import shutil
 import asyncio
 import tempfile
+from pathlib import Path
 from playwright.async_api import async_playwright
 from pptx import Presentation
 from pptx.util import Inches, Pt
+from pptx.enum.text import PP_ALIGN
 from PIL import Image
 
 
@@ -50,8 +52,8 @@ CHART_SELECTOR = "div.figure"
 
 async def render_file(page, html_path, out_subdir):
     os.makedirs(out_subdir, exist_ok=True)
-    abs_path = os.path.abspath(html_path)
-    await page.goto(f"file://{abs_path}")
+    # as_uri() builds a valid file URL on Windows (Z:/...), Mac and Linux
+    await page.goto(Path(html_path).resolve().as_uri())
 
     # Give Plotly time to finish drawing all charts
     await page.wait_for_timeout(1500)
@@ -292,9 +294,9 @@ def add_slide_with_grid(slide_title, image_paths, all_figure_titles):
         tf_fig = fig_title_shape.text_frame
         tf_fig.text = fig_title_text
         tf_fig.paragraphs[0].font.size = Pt(9)
-        tf_fig.paragraphs[0].alignment = 1  # Center alignment
+        tf_fig.paragraphs[0].alignment = PP_ALIGN.CENTER
         tf_fig.paragraphs[0].font.name = 'Times New Roman'
-        tf_fig.paragraphs[0].word_wrap = False
+        tf_fig.word_wrap = False
 
 
 # Sort slides in natural order (1F, 2F, ..., 10F, 1L, 2L, ...) instead of
